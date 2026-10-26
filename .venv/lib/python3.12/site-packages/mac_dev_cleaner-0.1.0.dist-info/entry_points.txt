@@ -1,0 +1,2 @@
+[console_scripts]
+mclean = mclean.cli:app

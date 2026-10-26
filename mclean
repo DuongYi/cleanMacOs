@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -e
+
+# Resolve the real project directory even when called through symlinks
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIR="$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )"
+
+# Check if .venv exists
+if [ ! -d "$SCRIPT_DIR/.venv" ]; then
+    echo "Creating virtual environment..."
+    python3 -m venv "$SCRIPT_DIR/.venv"
+    "$SCRIPT_DIR/.venv/bin/pip" install -e "$SCRIPT_DIR"
+fi
+
+exec "$SCRIPT_DIR/.venv/bin/python3" -m mclean.cli "$@"

@@ -56,7 +56,7 @@ class AppleXcodeScanner(BaseScanner):
         targets.append(CleanTarget(
             name="iOS Simulators: Delete Unavailable",
             category=self.category,
-            path=home / "Library/Developer/CoreSimulator/Devices",
+            path=home / "Library/Developer/CoreSimulator/Caches",
             size_bytes=0,  # Command-based, dynamically recovers space
             risk_tier=RiskTier.TIER1_SAFE,
             description="Calls 'xcrun simctl delete unavailable' to safely remove obsolete runtimes",

@@ -22,6 +22,8 @@ DEFAULT_PROJECT_ROOTS = [
 PERMANENT_BLACKLIST = {
     Path.home() / ".pub-cache" / "hosted",
     Path.home() / ".gradle" / "caches" / "modules-2",
+    Path.home() / "Library" / "Developer" / "CoreSimulator" / "Devices",
+    Path.home() / ".android" / "avd",
     Path.home() / ".ssh",
     Path.home() / ".gnupg",
     Path("/System"),

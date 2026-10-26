@@ -20,13 +20,25 @@ from mclean.models import CleanTarget
 from mclean.scanners.ai_python import AiPythonScanner
 from mclean.scanners.android_java import AndroidJavaScanner
 from mclean.scanners.apple_xcode import AppleXcodeScanner
+from mclean.scanners.docker import DockerScanner, run_docker_prune
 from mclean.scanners.flutter_dart import FlutterDartScanner
 from mclean.scanners.installer import scan_installers
+from mclean.scanners.large_files import find_large_files, reveal_in_finder
 from mclean.scanners.optimizer import run_all_optimizations
 from mclean.scanners.system_junk import SystemJunkScanner
 from mclean.utils.disk import get_disk_space, safe_delete_path
-from mclean.utils.formatters import format_size
+from mclean.utils.formatters import format_size, format_timestamp
 from mclean.utils.guard import get_active_dev_processes
+from mclean.utils.history import (
+    get_total_lifetime_savings,
+    load_history,
+    record_cleanup,
+)
+from mclean.utils.scheduler import (
+    get_schedule_status,
+    install_schedule,
+    remove_schedule,
+)
 
 console = Console()
 
@@ -38,12 +50,15 @@ def print_header():
     used_pct = (used / total) * 100
     color = "green" if free_pct > 20 else "yellow" if free_pct > 10 else "red"
 
+    total_lifetime = get_total_lifetime_savings()
+
     console.print()
     console.print(
         Panel(
             f"Ổ đĩa macOS: [bold]{format_size(used)}[/bold] đã dùng ({used_pct:.1f}%) | "
             f"Còn trống: [bold {color}]{format_size(free)}[/bold {color}] ({free_pct:.1f}%) | "
-            f"Tổng: [bold]{format_size(total)}[/bold]",
+            f"Tổng: [bold]{format_size(total)}[/bold]\n"
+            f"🏆 [dim]Tổng dung lượng mclean đã tiết kiệm cho bạn: [/dim][bold green]{format_size(total_lifetime)}[/bold green]",
             title="💾 [bold cyan]mclean - macOS Storage Status[/bold cyan]",
             border_style="cyan",
         )
@@ -65,6 +80,7 @@ def scan_with_live_progress() -> List[CleanTarget]:
         ("Android SDK & Gradle Caches", AndroidJavaScanner()),
         ("Flutter Projects Cũ (>14 ngày)", FlutterDartScanner()),
         ("AI Models & Python Caches", AiPythonScanner()),
+        ("Docker & Container Files", DockerScanner()),
         ("System Junk & Package Managers", SystemJunkScanner()),
     ]
 
@@ -88,8 +104,8 @@ def scan_with_live_progress() -> List[CleanTarget]:
                 all_targets.extend(targets)
                 cat_size = sum(t.size_bytes for t in targets)
                 progress.update(sub_task, completed=100, found_size=format_size(cat_size))
-            except Exception as e:
-                progress.update(sub_task, completed=100, found_size=f"[red]Lỗi[/red]")
+            except Exception:
+                progress.update(sub_task, completed=100, found_size="0 B")
             progress.advance(overall_task)
 
     all_targets.sort(key=lambda t: t.size_bytes, reverse=True)
@@ -169,6 +185,9 @@ def clean_targets_with_progress(targets_to_clean: List[CleanTarget]) -> int:
                 reclaimed += t.size_bytes
             progress.advance(task)
 
+    if reclaimed > 0:
+        record_cleanup(reclaimed, [t.name for t in targets_to_clean])
+
     console.print(f"\n[bold green]🎉 Hoàn tất![/bold green] Đã giải phóng thành công: [bold green]{format_size(reclaimed)}[/bold green]\n")
     print_header()
     return reclaimed
@@ -191,12 +210,16 @@ def interactive_dashboard_menu():
                 "2. 🎯 Chọn lọc từng mục (Duyệt chi tiết Model AI, Simulators, AVD)",
                 "3. 🚀 Tối ưu hệ thống (Làm mới DNS, QuickLook, chặn rác .DS_Store)",
                 "4. 📦 Dọn tệp cài đặt & mobile builds trong Downloads",
-                "5. 🔍 Quét lại hệ thống",
-                "6. ❌ Thoát",
+                "5. 🐘 Quét tệp siêu lớn (> 500 MB)",
+                "6. 🐳 Dọn dẹp Docker & Container",
+                "7. 📜 Xem nhật ký dọn dẹp & Tổng dung lượng tiết kiệm",
+                "8. ⏱️ Cài đặt lịch dọn tự động hàng tuần",
+                "9. 🔍 Quét lại hệ thống",
+                "10. ❌ Thoát",
             ],
         ).ask()
 
-        if not choice or "6. ❌ Thoát" in choice:
+        if not choice or "10. ❌ Thoát" in choice:
             console.print("[dim]Tạm biệt![/dim]")
             break
 
@@ -261,9 +284,80 @@ def interactive_dashboard_menu():
                         ok, _ = safe_delete_path(t.path)
                         if ok:
                             cleaned += t.size_bytes
+                    if cleaned > 0:
+                        record_cleanup(cleaned, [t.name for t in installer_targets])
                     console.print(f"[bold green]🎉 Đã giải phóng: {format_size(cleaned)}[/bold green]\n")
 
-        elif "5. 🔍 Quét lại" in choice:
+        elif "5. 🐘 Quét tệp siêu lớn" in choice:
+            console.print("\n[bold cyan]🔍 Đang quét các tệp >= 500 MB trong thư mục của bạn...[/bold cyan]")
+            items = find_large_files(root=Path.home(), min_size_mb=500, max_results=20)
+            if not items:
+                console.print("[green]✨ Không có tệp nào lớn hơn 500 MB.[/green]\n")
+            else:
+                table = Table(title="Top Tệp Siêu Nặng Tìm Thấy")
+                table.add_column("Phân loại", style="cyan")
+                table.add_column("Tên tệp", style="white")
+                table.add_column("Dung lượng", style="bold yellow", justify="right")
+                table.add_column("Ngày sửa đổi", style="dim")
+                for it in items:
+                    table.add_row(it.file_type, it.path.name, format_size(it.size_bytes), format_timestamp(it.mtime))
+                console.print(table)
+
+                chosen_file = questionary.select(
+                    "Chọn tệp để thao tác (hoặc bỏ qua):",
+                    choices=[questionary.Choice(title=f"{it.path.name} ({format_size(it.size_bytes)})", value=it) for it in items] + [questionary.Choice(title="❌ Bỏ qua", value=None)],
+                ).ask()
+
+                if chosen_file:
+                    act = questionary.select(
+                        f"Thao tác cho {chosen_file.path.name}:",
+                        choices=["1. 📂 Mở vị trí tệp trong Finder", "2. 🗑️ Xoá tệp này", "3. ❌ Huỷ"],
+                    ).ask()
+                    if "1. 📂 Mở" in act:
+                        reveal_in_finder(chosen_file.path)
+                    elif "2. 🗑️ Xoá" in act:
+                        if questionary.confirm(f"Xoá tệp {chosen_file.path.name}?", default=False).ask():
+                            ok, _ = safe_delete_path(chosen_file.path)
+                            if ok:
+                                record_cleanup(chosen_file.size_bytes, [chosen_file.path.name])
+                                console.print(f"[bold green]🎉 Đã giải phóng: {format_size(chosen_file.size_bytes)}[/bold green]\n")
+
+        elif "6. 🐳 Dọn dẹp Docker" in choice:
+            scanner = DockerScanner()
+            if not scanner.is_docker_running():
+                console.print("[yellow]Docker daemon hiện đang tắt.[/yellow]\n")
+            else:
+                if questionary.confirm("Chạy Docker prune để dọn build cache & dangling images?", default=True).ask():
+                    ok, output = run_docker_prune()
+                    console.print(Panel(output, title="Docker Prune Result", border_style="green" if ok else "red"))
+
+        elif "7. 📜 Xem nhật ký" in choice:
+            records = load_history()
+            total_lt = get_total_lifetime_savings()
+            console.print(Panel(f"🏆 Tổng dung lượng đã tiết kiệm: [bold green]{format_size(total_lt)}[/bold green]\nSố lần dọn: {len(records)} lần", border_style="green"))
+            if records:
+                table = Table(title="Lịch Sử Dọn Dẹp Gần Đây")
+                table.add_column("Thời gian", style="cyan")
+                table.add_column("Giải phóng", style="bold green", justify="right")
+                table.add_column("Số mục", justify="center")
+                table.add_column("Chi tiết", style="dim")
+                for r in reversed(records[-10:]):
+                    table.add_row(r.get("timestamp", "")[:19].replace("T", " "), format_size(r.get("reclaimed_bytes", 0)), str(r.get("items_count", 0)), ", ".join(r.get("items", [])[:4]))
+                console.print(table)
+            console.print()
+
+        elif "8. ⏱️ Cài đặt lịch" in choice:
+            info = get_schedule_status()
+            console.print(f"Trạng thái hiện tại: [bold cyan]{info.get('status')}[/bold cyan]")
+            sched_act = questionary.select("Tuỳ chọn lịch:", choices=["1. ✅ Kích hoạt lịch dọn tự động mỗi sáng Thứ Hai", "2. ❌ Huỷ bỏ lịch dọn ngầm", "3. ↩️ Quay lại"]).ask()
+            if "1. ✅ Kích hoạt" in sched_act:
+                ok, msg = install_schedule(weekday=1, hour=9, minute=0)
+                console.print(f"[bold green]{msg}[/bold green]\n")
+            elif "2. ❌ Huỷ" in sched_act:
+                ok, msg = remove_schedule()
+                console.print(f"[yellow]{msg}[/yellow]\n")
+
+        elif "9. 🔍 Quét lại" in choice:
             console.print("\n[bold cyan]🔍 Đang quét lại hệ thống...[/bold cyan]\n")
             targets = scan_with_live_progress()
             console.print()

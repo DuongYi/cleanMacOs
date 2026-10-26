@@ -1,118 +1,120 @@
 # ⚡ mclean (macOS Developer & AI Precision Cleaner)
 
-> **Công cụ dọn rác & tối ưu chuyên dụng cho lập trình viên Flutter, Mobile & AI trên macOS.**  
-> Chắt lọc tinh hoa từ **PureMac** (7.4k ⭐) & **tw93/Mole** (72.8k ⭐).  
+> **Công cụ dọn rác, tối ưu & tự động hoá chuyên dụng cho lập trình viên Flutter, Mobile & AI trên macOS.**  
+> Chắt lọc tinh hoa từ **tw93/Mole** (72.8k ⭐) và **PureMac** (7.4k ⭐).  
 > Giải quyết triệt để vấn đề đầy ổ cứng mà **KHÔNG BAO GIỜ gây ra vòng lặp tải lại dữ liệu**.
 
 ---
 
-## 🎯 Điểm Khác Biệt & Triết Lý An Toàn
-
-Hầu hết các công cụ dọn dẹp macOS thông thường thường xoá mù quáng các thư mục như `~/.gradle`, `~/.pub-cache` hay `~/.cache/huggingface`. Điều này dẫn đến thảm hoạ: vừa xoá xong, mở dự án lên lại phải chờ tải lại hàng chục gigabyte dữ liệu và build lại từ đầu.
-
-**`mclean` áp dụng mô hình 3 Tầng An Toàn (Surgical Precision Safety Tiers):**
+## 🎯 Triết Lý 3 Tầng An Toàn (Surgical Precision)
 
 | Tầng | Định nghĩa | Hành vi của mclean |
 | :--- | :--- | :--- |
-| 🟢 **Tier 1: 100% SAFE** | Dữ liệu rác thật (log cũ, file tạm, cache Gradle bản cũ > 30 ngày, build dự án đã lâu không đụng tới). | **Tự động dọn** khi chạy lệnh `mclean clean`. Xoá xong **mọi project vẫn chạy ngay lập tức** mà không tải lại 1 byte nào. |
-| 🟡 **Tier 2: REVIEW** | Model AI (HuggingFace, Ollama), máy ảo iOS/Android nặng. | **Chỉ dọn khi bạn chọn** qua giao diện Checkbox tương tác (`mclean interactive` hoặc `mclean ui`). |
+| 🟢 **Tier 1: 100% SAFE** | Rác thật (log cũ, file tạm, cache Gradle bản cũ > 30 ngày, build dự án đã lâu không đụng tới). | **Tự động dọn**. Xoá xong **mọi project vẫn chạy ngay lập tức** mà không tải lại 1 byte nào. |
+| 🟡 **Tier 2: REVIEW** | Model AI (HuggingFace, Ollama), máy ảo iOS/Android nặng. | **Chỉ dọn khi bạn chọn** qua menu tương tác (`mclean interactive` hoặc `mclean`). |
 | 🔴 **Tier 3: LOCKED** | Dữ liệu sống (package Dart `pub-cache/hosted`, Android AVD `userdata.img`, Gradle `modules-2`). | **Chặn vĩnh viễn**, không bao giờ xoá nhầm. |
 
 ---
 
-## 🚀 Chạy Lệnh Toàn Cục (Global Command)
+## 🚀 Khởi Động Nhanh
 
-Lệnh `mclean` đã được liên kết sẵn vào hệ thống macOS. Bạn có thể mở Terminal bất kỳ và gõ:
+Lệnh `mclean` đã được liên kết sẵn vào hệ thống macOS. Bạn chỉ cần mở Terminal bất kỳ và gõ:
 
 ```bash
-mclean --help
-mclean status
-mclean scan
+mclean
 ```
+*(Nếu không truyền tham số, `mclean` sẽ tự động mở **Dashboard tương tác trực quan** với thanh tiến trình trực tiếp siêu mượt!)*
 
 ---
 
-## 🛠️ Các Lệnh Chính Của `mclean`
+## 🛠️ Bộ Lệnh Toàn Diện Của `mclean`
 
-### 1. `mclean ui` (🖥️ Dashboard Trực Quan Toàn Màn Hình)
-Mở giao diện Dashboard TUI đồ hoạ ngay trong Terminal (dùng chuột click, phím mũi tên `↑/↓`, phím `Space` để tick chọn, `S` để quét, `C` để dọn, `Q` để thoát).
+### 1. 🖥️ Dashboard & Tương Tác
+- `mclean`: Mở Dashboard tương tác tổng hợp (10 tính năng nhanh trong 1 màn hình).
+- `mclean scan`: Quét toàn diện hệ thống với thanh tiến trình đồ hoạ và bảng phân tích màu sắc.
+- `mclean clean`: Dọn dẹp nhanh các mục `SAFE` mà không làm tải lại dữ liệu.
+- `mclean interactive` (hoặc `mclean clean -i`): Menu Checkbox duyệt chọn từng Model AI và máy ảo.
+
+### 2. ⏱️ Tự Động Hoá & Lịch Ngầm (`mclean schedule`)
+Đăng ký macOS `LaunchAgent` tự động chạy ngầm:
 ```bash
-mclean ui
+# Xem trạng thái lịch hiện tại
+mclean schedule
+
+# Kích hoạt lịch dọn tự động mỗi sáng Thứ Hai lúc 09:00 (kèm thông báo macOS)
+mclean schedule --install
+
+# Huỷ bỏ lịch chạy ngầm
+mclean schedule --remove
 ```
 
-### 2. `mclean scan` (🔍 Báo Cáo Phân Tích Dung Lượng)
-Quét toàn diện hệ thống (Xcode, Android, Flutter, AI, System) và hiển thị bảng phân tích màu sắc, phân loại rõ mục nào là `SAFE` (dọn ngay) và mục nào là `REVIEW` (cần chọn lọc).
+### 3. 📜 Nhật Ký & Thống Kê Tiết Kiệm (`mclean history`)
+Theo dõi tổng số GB mà bạn đã giải phóng được từ trước đến nay:
 ```bash
-mclean scan
+# Xem tổng dung lượng đã cứu sống và danh sách các lần dọn gần nhất
+mclean history
+
+# Xoá lịch sử
+mclean history --clear
 ```
 
-### 3. `mclean clean` (🧹 Dọn Dẹp An Toàn)
-Dọn dẹp các mục an toàn 100% (Tier 1 SAFE).
+### 4. 🐳 Dọn Dẹp Docker & Containers (`mclean docker`)
+Dọn dẹp triệt để Docker build cache, dangling images và stopped containers:
 ```bash
-# Xem thử trước những file sẽ bị xoá (không xoá thật)
-mclean clean --dry-run
+mclean docker
 
-# Dọn dẹp an toàn tất cả mục SAFE
-mclean clean
-
-# Chỉ dọn riêng một danh mục (xcode, android, ai, dev, system, trash)
-mclean clean xcode
-mclean clean android
-mclean clean ai
+# Deep clean (xoá toàn bộ container và image không dùng)
+mclean docker --all
 ```
 
-### 4. `mclean interactive` (🎯 Chọn Lọc Từng Mục)
-Mở menu checkbox chọn lọc từng Model AI (ví dụ: `stabilityai/sd-turbo` 2.4 GB) hoặc từng máy ảo iOS Simulator / Android AVD nặng hàng chục GB.
+### 5. 🐘 Quét Tệp Siêu Nặng Thất Lạc (`mclean large-files`)
+Rà soát nhanh các tệp lớn (video quay màn hình, checkpoint model AI `.safetensors`, `.onnx`, file nén lớn):
 ```bash
-mclean interactive
+# Quét tệp >= 500 MB (mặc định)
+mclean large-files
+
+# Quét tệp >= 100 MB kèm chọn thao tác xem trong Finder hoặc xoá
+mclean large-files --min-size 100 --interactive
 ```
 
-### 5. `mclean optimize` (🚀 Tối Ưu Hệ Thống macOS - Cảm hứng từ tw93/Mole)
-Thực hiện các tác vụ tinh chỉnh hệ thống chuyên sâu:
-- **Chặn Finder tự động tạo file `.DS_Store` rác** lên ổ đĩa USB và ổ đĩa mạng.
-- **Làm mới bộ nhớ đệm DNS** (Flush DNS Cache).
-- **Làm mới QuickLook & Icon Cache** (sửa lỗi thumbnail, icon app bị trắng).
-- **Dọn dẹp lịch sử theo dõi Quarantine** của macOS Gatekeeper.
+### 6. 🚀 Tối Ưu Hệ Thống macOS (`mclean optimize`)
+Thực hiện các tinh chỉnh hệ thống chuyên sâu (chuẩn tw93/Mole):
+- Chặn Finder tự động tạo file ẩn `.DS_Store` rác trên USB và ổ đĩa mạng.
+- Làm mới bộ nhớ đệm DNS (Flush DNS Cache).
+- Làm mới QuickLook & Icon Thumbnail Cache.
+- Dọn dẹp lịch sử Quarantine của Apple Gatekeeper.
 ```bash
 mclean optimize
 ```
 
-### 6. `mclean installer` (📦 Dọn File Cài Đặt & Mobile Builds Tồn Đọng)
-Quét thư mục `~/Downloads` tìm các tệp cài đặt `.dmg`, `.pkg`, `.iso` và các bản build di động `.apk`, `.ipa`, `.aab` lớn đã tải về từ lâu:
+### 7. 📦 Dọn Tệp Cài Đặt & Mobile Builds (`mclean installer`)
+Quét thư mục `~/Downloads` tìm các file `.dmg`, `.pkg`, `.iso` và các bản build `.apk`, `.ipa`, `.aab` cũ:
 ```bash
-mclean installer --dry-run
 mclean installer --older-than 7
 ```
 
-### 7. `mclean purge [path]` (🗑️ Dọn Thư Mục Build Cũ Của Dự Án)
-Quét sâu vào các thư mục dự án để tìm và dọn dẹp các thư mục `build/`, `.dart_tool/`, `node_modules/`, `Pods/` của những dự án **đã không code trong hơn 14 ngày qua**:
+### 8. 🗑️ Dọn Thư Mục Build Dự Án Cũ (`mclean purge`)
+Quét sâu các dự án Flutter, Node, Python và xoá `build/`, `.dart_tool/` của các dự án không đụng tới hơn 14 ngày:
 ```bash
-# Quét các dự án trong thư mục Code/Projects
-mclean purge ~/Projects
-
-# Chỉ dọn các dự án không đụng tới hơn 30 ngày
-mclean purge ~/Projects --older-than 30
+mclean purge ~/Projects --older-than 14
 ```
 
-### 8. `mclean analyze [path]` (📊 Phân Tích Dung Lượng Cục Bộ)
-Trình khám phá dung lượng (Read-only Explorer), phân tích và sắp xếp các thư mục con theo thứ tự giảm dần từ nặng nhất đến nhẹ nhất mà không xoá bất cứ thứ gì:
+### 9. 📊 Trình Khám Phá Dung Lượng (`mclean analyze`)
+Phân tích và sắp xếp các thư mục con theo dung lượng giảm dần (Read-only Explorer):
 ```bash
 mclean analyze ~
-mclean analyze ~/Library
 ```
 
-### 9. `mclean ignore` (🛡️ Danh Sách Bảo Vệ)
-Bảo vệ các thư mục dự án quan trọng hoặc khách hàng bí mật để `mclean` không bao giờ quét vào:
+### 10. 🛡️ Danh Sách Bảo Vệ (`mclean ignore`)
+Bảo vệ các thư mục dự án bí mật của công ty hoặc khách hàng:
 ```bash
 mclean ignore list
-mclean ignore add ~/Projects/production_app
-mclean ignore remove ~/Projects/production_app
+mclean ignore add ~/Projects/my_important_project
+mclean ignore remove ~/Projects/my_important_project
 ```
 
 ---
 
-## 🛡️ Tích Hợp Tự Động Process Guard
+## 🛡️ Tích Hợp Sẵn Process Guard
 
-Trước khi dọn dẹp, `mclean` tự động kiểm tra xem các phần mềm như Xcode, Android Studio, iOS Simulator, Flutter CLI, hay Ollama có đang mở không qua `psutil`. Nếu bạn đang build hoặc code, công cụ sẽ:
-1. Phát hiện và cảnh báo PID của ứng dụng đang chạy.
-2. Từ chối hoặc hỏi xác nhận để không làm crash tiến trình bạn đang làm việc.
+Trước khi dọn dẹp, `mclean` tự động phát hiện xem Xcode, Android Studio, Flutter, iOS Simulator, hay Ollama có đang mở không. Nếu đang chạy, công cụ sẽ cảnh báo để bảo vệ tiến trình của bạn không bị gián đoạn.

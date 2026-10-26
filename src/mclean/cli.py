@@ -1,7 +1,11 @@
 """mclean: macOS Developer & AI Precision Cleaner CLI Interface."""
 
 import json
+import os
 import subprocess
+import sys
+import time
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -14,10 +18,13 @@ from rich.table import Table
 
 from mclean.cleaner import execute_clean, split_by_running_apps
 from mclean.config import (
-    DEFAULT_INACTIVE_DAYS,
-    DEFAULT_PROJECT_ROOTS,
+    CONFIG_FILE,
+    SETTINGS_SCHEMA,
     load_ignored_paths,
+    load_settings,
     save_ignored_paths,
+    save_settings,
+    setting,
 )
 from mclean.models import Category, CleanTarget, RiskTier
 from mclean.scanners.ai_python import AiPythonScanner
@@ -41,10 +48,17 @@ from mclean.utils.history import (
     record_cleanup,
 )
 from mclean.utils.scheduler import (
+    ALERT_INTERVAL_HOURS,
+    get_disk_alert_status,
     get_schedule_status,
+    install_disk_alert,
     install_schedule,
+    remove_disk_alert,
     remove_schedule,
 )
+from mclean.utils.state import load_state, update_state
+
+ALERT_COOLDOWN_SECONDS = 24 * 3600
 
 app = typer.Typer(
     name="mclean",
@@ -199,6 +213,62 @@ def notify_macos(title: str, message: str) -> None:
     subprocess.run(["osascript", "-e", script], capture_output=True, check=False)
 
 
+LAST_USED_KEYS = ("last_active", "last_used", "last_accessed")
+
+
+def build_target_choices(targets: List[CleanTarget]) -> list:
+    """Checkbox choices grouped by category (largest group first). Only SAFE items start checked."""
+    groups = {}
+    for t in targets:
+        groups.setdefault(t.category, []).append(t)
+
+    choices = []
+    for category, items in sorted(groups.items(), key=lambda kv: -sum(t.size_bytes for t in kv[1])):
+        safe = sum(t.size_bytes for t in items if t.is_safe)
+        review = sum(t.size_bytes for t in items if not t.is_safe)
+        summary = " · ".join(
+            part for part in (f"SAFE {format_size(safe)}" if safe else "", f"REVIEW {format_size(review)}" if review else "") if part
+        ) or "0 B"
+        choices.append(questionary.Separator(f"\n── {category.value} ({summary}) ──"))
+        for t in sorted(items, key=lambda t: (not t.is_safe, -t.size_bytes)):
+            last_used = next((t.metadata[k] for k in LAST_USED_KEYS if t.metadata.get(k)), None)
+            used = f" · dùng lần cuối {format_timestamp(last_used)}" if last_used else ""
+            tier = "SAFE  " if t.is_safe else "REVIEW"
+            choices.append(questionary.Choice(
+                title=f"{tier} {t.name} ({format_size(t.size_bytes)}){used}",
+                value=t,
+                checked=t.is_safe,
+                description=t.description,
+            ))
+    return choices
+
+
+def folders_readable() -> dict:
+    """Whether this process may read the main project folders (macOS privacy may block background jobs)."""
+    result = {}
+    for root in [Path.home() / "Desktop", Path.home() / "Documents", Path.home() / ".Trash"]:
+        try:
+            next(os.scandir(root), None)
+            result[str(root)] = True
+        except PermissionError:
+            result[str(root)] = False
+        except OSError:
+            pass
+    return result
+
+
+def record_auto_clean(reclaimed: int, failed: int, blocked: int) -> None:
+    """Remember the last unattended run so `mclean doctor` can report on it."""
+    update_state(last_auto_clean={
+        "time": datetime.now().isoformat(timespec="seconds"),
+        "reclaimed_bytes": reclaimed,
+        "failed": failed,
+        "blocked": blocked,
+        "readable": folders_readable(),
+        "executable": sys.executable,
+    })
+
+
 def print_blocked(blocked) -> None:
     console.print("\n[bold yellow]⏸  Tạm bỏ qua vì ứng dụng đang dùng:[/bold yellow]")
     for t, conflicts in blocked:
@@ -237,16 +307,9 @@ def clean(
 
     # Handle Interactive mode (Questionary)
     if interactive:
-        choices = []
-        for t in all_targets:
-            tier_label = "[SAFE]" if t.is_safe else "[REVIEW]"
-            label = f"{tier_label} {t.name} ({format_size(t.size_bytes)}) - {t.description}"
-            # Default to checked only for SAFE items
-            choices.append(questionary.Choice(title=label, value=t, checked=t.is_safe))
-
         selected: Optional[List[CleanTarget]] = questionary.checkbox(
-            "Dùng phím mũi tên và phím SPACE để chọn/bỏ chọn mục muốn dọn:",
-            choices=choices,
+            "↑/↓ di chuyển · SPACE chọn/bỏ · Enter dọn. SAFE được chọn sẵn, REVIEW thì bạn tự chọn:",
+            choices=build_target_choices(all_targets),
         ).ask()
 
         if not selected:
@@ -268,6 +331,7 @@ def clean(
     if not targets_to_clean:
         console.print("[yellow]Không còn mục nào dọn được lúc này.[/yellow]")
         if notify:
+            record_auto_clean(0, 0, len(blocked))
             notify_macos("mclean Auto-Clean", "Đã bỏ qua: các ứng dụng phát triển đang mở.")
         return
 
@@ -298,6 +362,7 @@ def clean(
         console.print(f"[red]✗ {t.name}: {msg}[/red]")
     console.print(f"\n[bold green]🎉 Hoàn tất![/bold green] Đã giải phóng thực tế: [bold green]{format_size(report.reclaimed)}[/bold green]")
     if notify:
+        record_auto_clean(report.reclaimed, len(report.failed), len(blocked))
         notify_macos("mclean Auto-Clean", f"Đã giải phóng {format_size(report.reclaimed)}, {len(report.failed)} mục lỗi, {len(blocked)} mục bỏ qua.")
     print_disk_banner()
 
@@ -313,13 +378,14 @@ def purge(
     path: Optional[str] = typer.Argument(
         None, help="Đường dẫn thư mục dự án cần quét (mặc định quét các thư mục Code)"
     ),
-    older_than: int = typer.Option(
-        DEFAULT_INACTIVE_DAYS, "--older-than", "-d", help="Chỉ dọn dự án không đụng tới hơn số ngày này"
+    older_than: Optional[int] = typer.Option(
+        None, "--older-than", "-d", help="Chỉ dọn dự án không đụng tới hơn số ngày này (mặc định: inactive_days trong config)"
     ),
     dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Chạy thử không xoá file thật"),
 ):
     """🗑️  Quét các dự án lâu không đụng tới: build Flutter (SAFE), node_modules và Pods (bạn chọn)."""
     scan_root = Path(path).expanduser().resolve() if path else Path.home() / "Desktop"
+    older_than = older_than or setting("inactive_days")
     console.print(f"[bold cyan]🔍 Quét các dự án không hoạt động trong > {older_than} ngày tại: {scan_root}[/bold cyan]")
 
     with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
@@ -442,6 +508,135 @@ def ignore(
             console.print(f"[green]Đã xoá khỏi danh sách bảo vệ: {p}[/green]")
         else:
             console.print("[yellow]Đường dẫn không có trong danh sách bảo vệ.[/yellow]")
+
+
+@app.command()
+def doctor():
+    """🩺 Kiểm tra sức khoẻ: lịch chạy ngầm, quyền truy cập, và IDE có đang tự tải lại Gradle không."""
+    from mclean.doctor import FAIL, INFO, OK, WARN, run_checks
+
+    icons = {OK: "[green]✅[/green]", WARN: "[yellow]⚠️ [/yellow]", FAIL: "[red]❌[/red]", INFO: "[dim]ℹ️ [/dim]"}
+    checks = run_checks()
+    table = Table(title="🩺 mclean doctor", show_header=True, header_style="bold magenta")
+    table.add_column("", no_wrap=True)
+    table.add_column("Kiểm tra", style="cyan", no_wrap=True)
+    table.add_column("Kết quả")
+    for c in checks:
+        table.add_row(icons[c.status], c.title, c.detail)
+    console.print(table)
+
+    to_fix = [c for c in checks if c.fix and c.status in (WARN, FAIL)]
+    if to_fix:
+        console.print("\n[bold]Cách sửa:[/bold]")
+        for c in to_fix:
+            console.print(f"\n{icons[c.status]} [bold]{c.title}[/bold]")
+            console.print(Panel(c.fix, border_style="yellow" if c.status == WARN else "red", expand=False))
+    else:
+        console.print("\n[green]Không có vấn đề nào cần sửa.[/green]")
+
+
+@app.command(name="check-space")
+def check_space(
+    notify: bool = typer.Option(False, "--notify", help="Gửi thông báo macOS nếu ổ sắp đầy (tối đa 1 lần/ngày)"),
+    force: bool = typer.Option(False, "--force", help="Bỏ qua giới hạn 1 thông báo/ngày"),
+):
+    """📉 Kiểm tra dung lượng trống; nếu dưới ngưỡng thì báo có thể dọn bao nhiêu (không xoá gì)."""
+    total, _used, free = get_disk_space()
+    free_pct = free / total * 100
+    threshold = setting("low_disk_percent")
+    if free_pct >= threshold:
+        console.print(f"[green]✅ Còn trống {format_size(free)} ({free_pct:.1f}%), trên ngưỡng cảnh báo {threshold}%.[/green]")
+        return
+
+    targets = run_all_scanners()
+    safe = sum(t.size_bytes for t in targets if t.is_safe)
+    review = sum(t.size_bytes for t in targets if not t.is_safe)
+    message = (
+        f"Ổ đĩa chỉ còn {format_size(free)} ({free_pct:.0f}%). "
+        f"Có thể dọn {format_size(safe)} an toàn và {format_size(review)} cần bạn chọn. Gõ: mclean"
+    )
+    console.print(f"[bold yellow]⚠️  {message}[/bold yellow]")
+
+    if notify:
+        last = load_state().get("last_disk_alert", 0)
+        if force or time.time() - last >= ALERT_COOLDOWN_SECONDS:
+            notify_macos("mclean: Ổ đĩa sắp đầy", message)
+            update_state(last_disk_alert=time.time())
+        else:
+            console.print("[dim]Đã báo trong 24 giờ qua, không gửi thông báo lặp lại.[/dim]")
+
+
+@app.command(name="config")
+def config_cmd(
+    action: str = typer.Argument("show", help="show | set KEY VALUE | add-root PATH | remove-root PATH | reset [KEY]"),
+    key: Optional[str] = typer.Argument(None, help="Tên thiết lập, hoặc đường dẫn với add-root/remove-root"),
+    value: Optional[str] = typer.Argument(None, help="Giá trị mới (số nguyên)"),
+):
+    """⚙️  Xem và chỉnh ngưỡng dọn dẹp, thư mục dự án (lưu tại ~/.config/mclean/config.json)."""
+    settings = load_settings()
+
+    if action == "set":
+        if key not in SETTINGS_SCHEMA or isinstance(SETTINGS_SCHEMA[key][0], list):
+            console.print(f"[red]Không có thiết lập số '{key}'. Gõ `mclean config` để xem danh sách.[/red]")
+            raise typer.Exit(code=2)
+        try:
+            number = int(value or "")
+        except ValueError:
+            number = 0
+        if number <= 0 or (key == "low_disk_percent" and number >= 100):
+            console.print(f"[red]Giá trị cho {key} phải là số nguyên dương{' dưới 100' if key == 'low_disk_percent' else ''}.[/red]")
+            raise typer.Exit(code=2)
+        settings[key] = number
+        save_settings(settings)
+        console.print(f"[green]Đã đặt {key} = {number}[/green]")
+    elif action in ("add-root", "remove-root"):
+        if not key:
+            console.print(f"[red]Thiếu đường dẫn: mclean config {action} ~/Projects[/red]")
+            raise typer.Exit(code=2)
+        root = str(Path(key).expanduser().resolve())
+        roots = [str(Path(r).expanduser().resolve()) for r in settings["project_roots"]]
+        if action == "add-root":
+            if not Path(root).is_dir():
+                console.print(f"[red]Thư mục không tồn tại: {root}[/red]")
+                raise typer.Exit(code=2)
+            if root not in roots:
+                roots.append(root)
+            console.print(f"[green]Đã thêm thư mục dự án: {root}[/green]")
+        else:
+            if root not in roots:
+                console.print(f"[yellow]Thư mục không có trong danh sách: {root}[/yellow]")
+                return
+            roots.remove(root)
+            console.print(f"[green]Đã bỏ thư mục dự án: {root}[/green]")
+        settings["project_roots"] = roots
+        save_settings(settings)
+    elif action == "reset":
+        if key and key not in SETTINGS_SCHEMA:
+            console.print(f"[red]Không có thiết lập '{key}'.[/red]")
+            raise typer.Exit(code=2)
+        for k in [key] if key else list(SETTINGS_SCHEMA):
+            settings[k] = SETTINGS_SCHEMA[k][0]
+        save_settings(settings)
+        console.print(f"[green]Đã khôi phục mặc định cho {key or 'mọi thiết lập'}.[/green]")
+    elif action != "show":
+        console.print(f"[red]Không có hành động '{action}'. Dùng: show, set, add-root, remove-root, reset.[/red]")
+        raise typer.Exit(code=2)
+
+    settings = load_settings()
+    table = Table(title=f"Cấu hình mclean ({CONFIG_FILE})")
+    table.add_column("Thiết lập", style="cyan", no_wrap=True)
+    table.add_column("Giá trị", style="bold")
+    table.add_column("Ý nghĩa", style="dim")
+    for k, (default, desc) in SETTINGS_SCHEMA.items():
+        current = settings[k]
+        if isinstance(current, list):
+            shown = "\n".join(f"{r}{'' if Path(r).expanduser().exists() else ' [red](không tồn tại)[/red]'}" for r in current)
+        else:
+            shown = str(current)
+        marker = "" if current == default else " [yellow]*[/yellow]"
+        table.add_row(k, shown + marker, desc)
+    console.print(table)
+    console.print("[dim]* = đã đổi so với mặc định. Ví dụ: mclean config set inactive_days 30 · mclean config add-root ~/Projects[/dim]")
 
 
 @app.command()
@@ -620,43 +815,39 @@ def history(
 def schedule(
     install: bool = typer.Option(False, "--install", "-i", help="Kích hoạt lịch dọn tự động ngầm hàng tuần"),
     remove: bool = typer.Option(False, "--remove", "-r", help="Huỷ bỏ lịch dọn tự động ngầm"),
-    status: bool = typer.Option(False, "--status", "-s", help="Xem trạng thái lịch hiện tại"),
+    alert_on: bool = typer.Option(False, "--alert-on", help=f"Bật cảnh báo ổ đầy (kiểm tra mỗi {ALERT_INTERVAL_HOURS} giờ, chỉ báo, không xoá)"),
+    alert_off: bool = typer.Option(False, "--alert-off", help="Tắt cảnh báo ổ đầy"),
     weekday: int = typer.Option(1, "--weekday", "-w", help="Thứ trong tuần (1 = Thứ Hai, 7 = Chủ nhật)"),
     hour: int = typer.Option(9, "--hour", help="Giờ chạy (0-23)"),
     minute: int = typer.Option(0, "--minute", help="Phút chạy (0-59)"),
 ):
-    """⏱️  Quản lý lịch tự động dọn rác định kỳ ngầm qua macOS LaunchAgent."""
+    """⏱️  Quản lý lịch dọn tự động hàng tuần và cảnh báo ổ đầy (macOS LaunchAgent)."""
+    actions = []
     if install:
-        ok, msg = install_schedule(weekday=weekday, hour=hour, minute=minute)
-        if ok:
-            console.print(f"[bold green]✨ {msg}[/bold green]")
-            console.print("[dim]Hệ thống sẽ tự động dọn mục SAFE và gửi macOS Notification khi hoàn tất.[/dim]")
-        else:
-            console.print(f"[bold red]❌ {msg}[/bold red]")
-        return
-
+        actions.append(install_schedule(weekday=weekday, hour=hour, minute=minute))
     if remove:
-        ok, msg = remove_schedule()
-        if ok:
-            console.print(f"[bold green]✨ {msg}[/bold green]")
-        else:
-            console.print(f"[bold red]❌ {msg}[/bold red]")
+        actions.append(remove_schedule())
+    if alert_on:
+        actions.append(install_disk_alert())
+    if alert_off:
+        actions.append(remove_disk_alert())
+    for ok, msg in actions:
+        console.print(f"[bold green]✨ {msg}[/bold green]" if ok else f"[bold red]❌ {msg}[/bold red]")
+    if actions:
         return
 
-    # Default: Show schedule status
-    info = get_schedule_status()
-    table = Table(title="Trạng Thái Lịch Dọn Ngầm (LaunchAgent)", show_header=False)
-    table.add_column("Thuộc tính", style="cyan")
-    table.add_column("Giá trị", style="white")
-
-    table.add_row("Tình trạng", info.get("installed", ""))
-    table.add_row("Hoạt động", info.get("status", ""))
-    table.add_row("Đường dẫn Plist", info.get("path", ""))
-
+    table = Table(title="Tác Vụ Chạy Ngầm (LaunchAgent)")
+    table.add_column("Tác vụ", style="cyan")
+    table.add_column("Tình trạng", style="white")
+    table.add_column("Đường dẫn Plist", style="dim")
+    for name, info in [("🧹 Dọn SAFE hàng tuần", get_schedule_status()), ("📉 Cảnh báo ổ đầy", get_disk_alert_status())]:
+        table.add_row(name, f"{info['installed']} · {info['status']}", info["path"])
     console.print(table)
     console.print(
-        "\n💡 [dim]Để kích hoạt lịch chạy mỗi sáng Thứ Hai lúc 09:00: [/dim][bold cyan]mclean schedule --install[/bold cyan]\n"
-        "💡 [dim]Để huỷ bỏ lịch: [/dim][bold red]mclean schedule --remove[/bold red]"
+        "\n💡 [dim]Dọn hàng tuần (Thứ Hai 09:00):[/dim] [bold cyan]mclean schedule --install[/bold cyan]   "
+        "[dim]Huỷ:[/dim] [bold red]mclean schedule --remove[/bold red]\n"
+        f"💡 [dim]Cảnh báo khi trống dưới {setting('low_disk_percent')}%:[/dim] [bold cyan]mclean schedule --alert-on[/bold cyan]   "
+        "[dim]Tắt:[/dim] [bold red]mclean schedule --alert-off[/bold red]"
     )
 
 

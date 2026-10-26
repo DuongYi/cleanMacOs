@@ -46,7 +46,15 @@ mclean schedule --install
 
 # Huỷ bỏ lịch chạy ngầm
 mclean schedule --remove
+
+# Cảnh báo khi ổ sắp đầy: kiểm tra mỗi 3 giờ, báo tối đa 1 lần/ngày, KHÔNG tự xoá gì
+mclean schedule --alert-on
+mclean schedule --alert-off
+
+# Kiểm tra ngay (không cần lịch)
+mclean check-space
 ```
+Lịch tự động chỉ dọn mục SAFE và luôn bỏ qua mục mà ứng dụng đang mở dùng tới.
 
 ### 3. 📜 Nhật Ký & Thống Kê Tiết Kiệm (`mclean history`)
 Theo dõi tổng số GB mà bạn đã giải phóng được từ trước đến nay:
@@ -116,6 +124,27 @@ mclean ignore remove ~/Projects/my_important_project
 
 ---
 
+### 11. ⚙️ Cấu Hình (`mclean config`)
+Các ngưỡng và thư mục dự án lưu ở `~/.config/mclean/config.json`:
+```bash
+mclean config                              # xem toàn bộ thiết lập
+mclean config set inactive_days 30         # coi dự án là "cũ" sau 30 ngày
+mclean config set low_disk_percent 10      # cảnh báo khi trống dưới 10%
+mclean config add-root ~/Projects          # thêm thư mục dự án để quét
+mclean config remove-root ~/Desktop
+mclean config reset                        # về mặc định
+```
+
+### 12. 🩺 Kiểm Tra Sức Khoẻ (`mclean doctor`)
+Kiểm tra lịch chạy ngầm, quyền truy cập của Terminal và job nền, lần dọn tự động gần nhất, và **phát hiện IDE đang tự tải lại Gradle** (extension Java/Gradle đi theo `ios/.symlinks` vào `~/.pub-cache`), kèm đoạn setting cần thêm:
+```bash
+mclean doctor
+```
+
+Trong `mclean interactive`, các mục được **nhóm theo loại** (nhóm lớn nhất lên đầu), kèm "dùng lần cuối" và mô tả của mục đang chọn.
+
+---
+
 ## 🔎 Những Gì `mclean` Quét
 
 | Khu vực | SAFE (tự dọn) | REVIEW (bạn chọn) |
@@ -144,4 +173,4 @@ Test chạy hoàn toàn trong thư mục tạm và không đụng tới cấu h�
 
 Trước khi dọn, `mclean` kiểm tra Xcode, iOS Simulator, Android Studio/Emulator, Gradle Daemon, Flutter/Dart, VS Code, Cursor, Ollama và LM Studio. Mục nào ứng dụng đang mở dùng tới sẽ **được bỏ qua**, không bị xoá, ở mọi chế độ (kể cả `--force` và lịch tự động). Bản Gradle mà một daemon đang chạy cũng không bao giờ bị đề xuất.
 
-> 💡 Extension Java/Gradle của VS Code-based IDE (`redhat.java`, `vscjava.vscode-gradle`) tự import cả các project Android mẫu trong `~/.pub-cache` và tải Gradle wrapper riêng cho từng project. Nếu không làm Android native, tắt `java.import.gradle.enabled` và `gradle.autoDetect` trong workspace Flutter để tránh tải về hàng GB không cần thiết.
+> 💡 Extension Java/Gradle của VS Code-based IDE (`redhat.java`, `vscjava.vscode-gradle`) tự import cả các project Android mẫu trong `~/.pub-cache` và tải Gradle wrapper riêng cho từng project. Chạy `mclean doctor` để biết IDE nào đang làm vậy và đoạn setting cần thêm (`java.import.exclusions`, `gradle.autoDetect`).

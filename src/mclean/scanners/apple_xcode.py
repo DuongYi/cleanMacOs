@@ -7,14 +7,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, List, Optional
 
+from mclean.config import setting
 from mclean.models import Category, CleanTarget, RiskTier
 from mclean.scanners.base import BaseScanner
 from mclean.utils.disk import get_batch_sizes, get_path_size
 from mclean.utils.formatters import format_timestamp
 
-DERIVED_DATA_IDLE_DAYS = 14
-SIMULATOR_IDLE_DAYS = 30
-RUNTIME_IDLE_DAYS = 30
 
 
 def _safe_children(path: Path) -> List[Path]:
@@ -103,11 +101,11 @@ class AppleXcodeScanner(BaseScanner):
         return targets
 
     def _scan_derived_data(self, root: Path) -> List[CleanTarget]:
-        """One target per project folder whose last build is older than DERIVED_DATA_IDLE_DAYS."""
+        """One target per project folder whose last build is older than derived_data_idle_days."""
         results: List[CleanTarget] = []
         if not root.is_dir():
             return results
-        cutoff = time.time() - DERIVED_DATA_IDLE_DAYS * 86400
+        cutoff = time.time() - setting("derived_data_idle_days") * 86400
         for item in root.iterdir():
             if not item.is_dir():
                 continue
@@ -150,7 +148,7 @@ class AppleXcodeScanner(BaseScanner):
         return results
 
     def _scan_runtimes(self) -> List[CleanTarget]:
-        """Simulator runtime disk images, offered only when unused for RUNTIME_IDLE_DAYS."""
+        """Simulator runtime disk images, offered only when unused for runtime_idle_days."""
         results: List[CleanTarget] = []
         try:
             res = subprocess.run(["xcrun", "simctl", "runtime", "list", "-j"], capture_output=True, text=True, timeout=20)
@@ -162,7 +160,7 @@ class AppleXcodeScanner(BaseScanner):
 
         for rid, rt in runtimes.items():
             idle = self._idle_days(rt.get("lastUsedAt"))
-            if not rt.get("deletable") or idle < RUNTIME_IDLE_DAYS:
+            if not rt.get("deletable") or idle < setting("runtime_idle_days"):
                 continue
             platform = rt.get("runtimeIdentifier", "").rsplit(".", 1)[-1].split("-")[0] or "Simulator"
             results.append(CleanTarget(
@@ -235,7 +233,7 @@ class AppleXcodeScanner(BaseScanner):
                             ))
                     else:
                         # Heavy shutdown simulators (> 1.5 GB) -> TIER 2 Review
-                        if state == "Shutdown" and self._idle_days(dev.get("lastBootedAt")) >= SIMULATOR_IDLE_DAYS:
+                        if state == "Shutdown" and self._idle_days(dev.get("lastBootedAt")) >= setting("simulator_idle_days"):
                             size = get_path_size(data_path)
                             if size > 1500 * 1024 * 1024:  # > 1.5 GB
                                 results.append(CleanTarget(

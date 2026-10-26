@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import List, Optional
 from packaging import version
 
+from mclean.config import setting
 from mclean.models import Category, CleanTarget, RiskTier
 from mclean.scanners.base import BaseScanner
 from mclean.utils.disk import get_batch_sizes, get_path_size
@@ -15,11 +16,9 @@ from mclean.utils.formatters import format_timestamp
 from mclean.utils.guard import running_gradle_dists
 from mclean.utils.projects import referenced_gradle_dists, referenced_gradle_versions, referenced_ndk_versions
 
-AVD_IDLE_DAYS = 14
-# A Gradle version is only offered after this long without any daemon or wrapper activity.
+# A Gradle version is only offered after gradle_idle_days without any daemon or wrapper activity.
 # IDE extensions (e.g. VS Code Java/Gradle) silently download wrappers of every project they
 # import, so "not referenced by my projects" alone would cause a delete/re-download loop.
-GRADLE_IDLE_DAYS = 30
 DAEMON_LOG_DAYS = 7
 
 
@@ -194,7 +193,7 @@ class AndroidJavaScanner(BaseScanner):
         in_use = running_gradle_dists()
         obsolete = [
             (v, item) for v, item in found_versions[:-2]
-            if item.name not in referenced | in_use and _gradle_idle_days(str(v), item) >= GRADLE_IDLE_DAYS
+            if item.name not in referenced | in_use and _gradle_idle_days(str(v), item) >= setting("gradle_idle_days")
         ]
         sizes = get_batch_sizes([item for _, item in obsolete])
         for v, item in obsolete:
@@ -231,7 +230,7 @@ class AndroidJavaScanner(BaseScanner):
         in_use = {re.sub(r"^gradle-|-(bin|all)$", "", d) for d in running_gradle_dists()}
         obsolete = [
             (v, item) for v, item in version_dirs[:-2]
-            if item.name not in referenced | in_use and _gradle_idle_days(item.name) >= GRADLE_IDLE_DAYS
+            if item.name not in referenced | in_use and _gradle_idle_days(item.name) >= setting("gradle_idle_days")
         ]
         sizes = get_batch_sizes([item for _, item in obsolete])
         for v, item in obsolete:
@@ -263,7 +262,7 @@ class AndroidJavaScanner(BaseScanner):
     def _scan_avds(self, avd_root: Path) -> List[CleanTarget]:
         """Scan AVDs idle for a while: their snapshots and temp caches regenerate locally on next boot."""
         results: List[CleanTarget] = []
-        cutoff = time.time() - AVD_IDLE_DAYS * 86400
+        cutoff = time.time() - setting("avd_idle_days") * 86400
 
         for avd_dir in avd_root.glob("*.avd"):
             if not avd_dir.is_dir():

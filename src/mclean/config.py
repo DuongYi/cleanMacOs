@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import Set
+from typing import Any, Dict, List, Set
 
 CONFIG_DIR = Path.home() / ".config" / "mclean"
 CONFIG_FILE = CONFIG_DIR / "config.json"
@@ -36,9 +36,58 @@ PERMANENT_BLACKLIST = {
 
 DEFAULT_INACTIVE_DAYS = 14
 
+# User-tunable settings stored in ~/.config/mclean/config.json: key -> (default, description)
+SETTINGS_SCHEMA: Dict[str, tuple] = {
+    "project_roots": ([str(p) for p in DEFAULT_PROJECT_ROOTS], "Thư mục chứa dự án cần quét"),
+    "inactive_days": (DEFAULT_INACTIVE_DAYS, "Số ngày không hoạt động để coi dự án là cũ (build Flutter, node_modules, Pods)"),
+    "derived_data_idle_days": (14, "Số ngày không build để dọn DerivedData của dự án Xcode"),
+    "avd_idle_days": (14, "Số ngày không bật để dọn snapshot AVD"),
+    "gradle_idle_days": (30, "Số ngày không chạy để dọn một bản Gradle không dự án nào dùng"),
+    "simulator_idle_days": (30, "Số ngày không bật để đề xuất erase iOS Simulator"),
+    "runtime_idle_days": (30, "Số ngày không dùng để đề xuất xoá runtime Simulator"),
+    "min_project_size_mb": (50, "Chỉ liệt kê build/node_modules/Pods lớn hơn số MB này"),
+    "low_disk_percent": (15, "Cảnh báo khi dung lượng trống dưới số % này"),
+}
+
 
 def ensure_config_dir():
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def load_settings() -> Dict[str, Any]:
+    """Settings from config.json merged over defaults. Invalid or unknown values fall back to defaults."""
+    settings = {key: default for key, (default, _) in SETTINGS_SCHEMA.items()}
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            stored = json.load(f)
+    except (OSError, ValueError):
+        return settings
+    for key, value in stored.items():
+        if key not in SETTINGS_SCHEMA:
+            continue
+        default = SETTINGS_SCHEMA[key][0]
+        if isinstance(default, list) and isinstance(value, list):
+            settings[key] = [str(v) for v in value]
+        elif isinstance(default, int) and isinstance(value, int) and value > 0:
+            settings[key] = value
+    return settings
+
+
+def save_settings(settings: Dict[str, Any]) -> None:
+    """Persist only values that differ from the defaults, so future default changes still apply."""
+    ensure_config_dir()
+    changed = {k: v for k, v in settings.items() if k in SETTINGS_SCHEMA and v != SETTINGS_SCHEMA[k][0]}
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(changed, f, indent=2, ensure_ascii=False)
+
+
+def setting(key: str) -> Any:
+    return load_settings()[key]
+
+
+def project_roots() -> List[Path]:
+    """Configured project folders that exist on this Mac."""
+    return [p for p in (Path(r).expanduser() for r in setting("project_roots")) if p.exists()]
 
 
 def load_ignored_paths() -> Set[Path]:

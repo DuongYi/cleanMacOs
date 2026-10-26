@@ -17,7 +17,7 @@ from rich.progress import (
 from rich.table import Table
 
 from mclean.cleaner import execute_clean, split_by_running_apps
-from mclean.cli import print_blocked, remove_user_files, select_installers
+from mclean.cli import build_target_choices, print_blocked, remove_user_files, select_installers
 from mclean.models import CleanTarget
 from mclean.scanners.ai_python import AiPythonScanner
 from mclean.scanners.android_java import AndroidJavaScanner
@@ -38,8 +38,11 @@ from mclean.utils.history import (
     load_history,
 )
 from mclean.utils.scheduler import (
+    get_disk_alert_status,
     get_schedule_status,
+    install_disk_alert,
     install_schedule,
+    remove_disk_alert,
     remove_schedule,
 )
 
@@ -221,13 +224,14 @@ def interactive_dashboard_menu():
                 "5. 🐘 Quét tệp siêu lớn (> 500 MB)",
                 "6. 🐳 Dọn dẹp Docker & Container",
                 "7. 📜 Xem nhật ký dọn dẹp & Tổng dung lượng tiết kiệm",
-                "8. ⏱️ Cài đặt lịch dọn tự động hàng tuần",
+                "8. ⏱️ Cài đặt lịch dọn tự động & cảnh báo ổ đầy",
                 "9. 🔍 Quét lại hệ thống",
-                "10. ❌ Thoát",
+                "10. 🩺 Kiểm tra sức khoẻ (doctor)",
+                "11. ❌ Thoát",
             ],
         ).ask()
 
-        if not choice or "10. ❌ Thoát" in choice:
+        if not choice or "11. ❌ Thoát" in choice:
             console.print("[dim]Tạm biệt![/dim]")
             break
 
@@ -242,15 +246,9 @@ def interactive_dashboard_menu():
                     targets = scan_with_live_progress()
 
         elif "2. 🎯 Chọn lọc" in choice:
-            choices = []
-            for t in targets:
-                tier_label = "[SAFE]" if t.is_safe else "[REVIEW]"
-                label = f"{tier_label} {t.name} ({format_size(t.size_bytes)}) - {t.description}"
-                choices.append(questionary.Choice(title=label, value=t, checked=t.is_safe))
-
             selected = questionary.checkbox(
-                "Dùng phím mũi tên và phím SPACE để chọn/bỏ chọn, Enter để dọn:",
-                choices=choices,
+                "↑/↓ di chuyển · SPACE chọn/bỏ · Enter dọn. SAFE được chọn sẵn, REVIEW thì bạn tự chọn:",
+                choices=build_target_choices(targets),
             ).ask()
 
             if selected:
@@ -346,17 +344,33 @@ def interactive_dashboard_menu():
             console.print()
 
         elif "8. ⏱️ Cài đặt lịch" in choice:
-            info = get_schedule_status()
-            console.print(f"Trạng thái hiện tại: [bold cyan]{info.get('status')}[/bold cyan]")
-            sched_act = questionary.select("Tuỳ chọn lịch:", choices=["1. ✅ Kích hoạt lịch dọn tự động mỗi sáng Thứ Hai", "2. ❌ Huỷ bỏ lịch dọn ngầm", "3. ↩️ Quay lại"]).ask()
-            if not sched_act:
+            weekly, alert = get_schedule_status(), get_disk_alert_status()
+            console.print(f"Dọn hàng tuần: [bold cyan]{weekly['installed']}[/bold cyan] · Cảnh báo ổ đầy: [bold cyan]{alert['installed']}[/bold cyan]")
+            sched_act = questionary.select(
+                "Tuỳ chọn tác vụ chạy ngầm:",
+                choices=[
+                    "1. ✅ Bật dọn SAFE tự động mỗi sáng Thứ Hai",
+                    "2. ❌ Tắt dọn tự động",
+                    "3. 📉 Bật cảnh báo ổ đầy (chỉ báo, không xoá)",
+                    "4. 🔕 Tắt cảnh báo ổ đầy",
+                    "5. ↩️ Quay lại",
+                ],
+            ).ask()
+            if not sched_act or "5. ↩️" in sched_act:
                 continue
-            if "1. ✅ Kích hoạt" in sched_act:
-                ok, msg = install_schedule(weekday=1, hour=9, minute=0)
-                console.print(f"[bold green]{msg}[/bold green]\n")
-            elif "2. ❌ Huỷ" in sched_act:
-                ok, msg = remove_schedule()
-                console.print(f"[yellow]{msg}[/yellow]\n")
+            action = {
+                "1.": lambda: install_schedule(weekday=1, hour=9, minute=0),
+                "2.": remove_schedule,
+                "3.": install_disk_alert,
+                "4.": remove_disk_alert,
+            }[sched_act[:2]]
+            ok, msg = action()
+            console.print(f"[bold green]{msg}[/bold green]\n" if ok else f"[bold red]{msg}[/bold red]\n")
+
+        elif "10. 🩺 Kiểm tra" in choice:
+            from mclean.cli import doctor
+            doctor()
+            console.print()
 
         elif "9. 🔍 Quét lại" in choice:
             console.print("\n[bold cyan]🔍 Đang quét lại hệ thống...[/bold cyan]\n")

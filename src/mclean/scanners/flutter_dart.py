@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 from typing import List, Optional
 
-from mclean.config import DEFAULT_INACTIVE_DAYS, DEFAULT_PROJECT_ROOTS, is_path_ignored, is_path_protected
+from mclean.config import is_path_ignored, is_path_protected, project_roots, setting
 from mclean.models import Category, CleanTarget, RiskTier
 from mclean.scanners.base import BaseScanner
 from mclean.utils.disk import get_path_size
@@ -19,9 +19,9 @@ DISPOSABLE_BUILD_PATHS = ["build", ".dart_tool/flutter_build"]
 class FlutterDartScanner(BaseScanner):
     """Scans inactive Flutter projects and safe pub-cache components."""
 
-    def __init__(self, workspace_roots: Optional[List[Path]] = None, inactive_days: int = DEFAULT_INACTIVE_DAYS):
-        self.workspace_roots = workspace_roots or [r for r in DEFAULT_PROJECT_ROOTS if r.exists()]
-        self.inactive_days = inactive_days
+    def __init__(self, workspace_roots: Optional[List[Path]] = None, inactive_days: Optional[int] = None):
+        self.workspace_roots = workspace_roots or project_roots()
+        self.inactive_days = inactive_days or setting("inactive_days")
 
     @property
     def name(self) -> str:
@@ -85,7 +85,7 @@ class FlutterDartScanner(BaseScanner):
                     continue
 
                 size = sum(get_path_size(p) for p in paths)
-                if size > 50 * 1024 * 1024:  # > 50MB
+                if size > setting("min_project_size_mb") * 1024 * 1024:
                     results.append(CleanTarget(
                         name=f"Inactive Flutter Project: {proj_dir.name}",
                         category=self.category,

@@ -4,14 +4,12 @@ import time
 from pathlib import Path
 from typing import List, Optional
 
-from mclean.config import DEFAULT_INACTIVE_DAYS, is_path_ignored, is_path_protected
+from mclean.config import is_path_ignored, is_path_protected, setting
 from mclean.models import Category, CleanTarget, RiskTier
 from mclean.scanners.base import BaseScanner
 from mclean.utils.disk import get_path_size
 from mclean.utils.formatters import format_timestamp
 from mclean.utils.projects import default_roots, latest_activity, walk_workspace
-
-MIN_SIZE = 50 * 1024 * 1024
 
 
 def _project_root(podfile_dir: Path) -> Path:
@@ -25,9 +23,9 @@ def _project_root(podfile_dir: Path) -> Path:
 class ProjectDepsScanner(BaseScanner):
     """Offers node_modules and Pods of inactive projects for review. Reinstalling them may download packages."""
 
-    def __init__(self, workspace_roots: Optional[List[Path]] = None, inactive_days: int = DEFAULT_INACTIVE_DAYS):
+    def __init__(self, workspace_roots: Optional[List[Path]] = None, inactive_days: Optional[int] = None):
         self.workspace_roots = workspace_roots or default_roots()
-        self.inactive_days = inactive_days
+        self.inactive_days = inactive_days or setting("inactive_days")
 
     @property
     def name(self) -> str:
@@ -81,7 +79,7 @@ class ProjectDepsScanner(BaseScanner):
         if not (0 < active < cutoff) or is_path_protected(deps_dir):
             return None
         size = get_path_size(deps_dir)
-        if size < MIN_SIZE:
+        if size < setting("min_project_size_mb") * 1024 * 1024:
             return None
         return CleanTarget(
             name=f"{kind} of inactive project: {project.name}",

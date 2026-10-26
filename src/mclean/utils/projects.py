@@ -7,7 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Iterable, List, Set, Tuple
 
-from mclean.config import DEFAULT_PROJECT_ROOTS
+from mclean.config import project_roots
 
 # Heavy or generated directories that never contain project sources worth inspecting
 PRUNED_DIR_NAMES = {
@@ -29,7 +29,7 @@ GRADLE_DIST_RE = re.compile(r"distributionUrl\s*=.*?/(gradle-[0-9][^/\s]*?-(?:bi
 
 
 def default_roots() -> List[Path]:
-    return [r for r in DEFAULT_PROJECT_ROOTS if r.exists()]
+    return project_roots()
 
 
 def is_flutter_sdk(path: Path) -> bool:

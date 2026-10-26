@@ -14,6 +14,8 @@ MB = 1024 * 1024
 def isolated_config(tmp_path, monkeypatch):
     (tmp_path / "config").mkdir()
     monkeypatch.setattr(config, "IGNORE_FILE", tmp_path / "config" / "ignore.json")
+    monkeypatch.setattr(config, "CONFIG_FILE", tmp_path / "config" / "config.json")
+    monkeypatch.setattr(config, "CONFIG_DIR", tmp_path / "config")  # state.json lives here
     monkeypatch.setattr(history, "HISTORY_FILE", tmp_path / "config" / "history.json")
     return tmp_path / "config"
 

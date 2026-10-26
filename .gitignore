@@ -1,0 +1,13 @@
+# Virtual environment (recreated by ./mclean on first run)
+.venv/
+
+# Python build and cache artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+
+# macOS
+.DS_Store

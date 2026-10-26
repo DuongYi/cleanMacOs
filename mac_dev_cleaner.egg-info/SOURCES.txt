@@ -1,7 +1,0 @@
-pyproject.toml
-mac_dev_cleaner.egg-info/PKG-INFO
-mac_dev_cleaner.egg-info/SOURCES.txt
-mac_dev_cleaner.egg-info/dependency_links.txt
-mac_dev_cleaner.egg-info/entry_points.txt
-mac_dev_cleaner.egg-info/requires.txt
-mac_dev_cleaner.egg-info/top_level.txt

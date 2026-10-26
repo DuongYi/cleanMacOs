@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0 — 2026-10-26
+
+### Tính năng mới
+- Cài bằng một lệnh: `curl -fsSL https://raw.githubusercontent.com/DuongYi/cleanMacOs/main/install.sh | bash`. Script kiểm tra macOS/git/Python, cài vào `~/.mclean`, thêm `mclean` vào PATH, hỏi có bật lịch tự động và cảnh báo ổ đầy không. Chạy lại để cập nhật, thêm `--uninstall` để gỡ.
+- `./install.sh` trong một bản clone có sẵn thì dùng luôn thư mục đó.
+- `mclean update`: tải bản mới và cài lại thư viện.
+
 ## 0.2.0 — 2026-10-26
 
 Nguyên tắc mới cho mục SAFE: chỉ dọn thứ **tự tạo lại tại máy** hoặc **không còn ai dùng**, và **không bao giờ đụng vào thứ mà ứng dụng đang mở dùng tới**. Mọi thứ xoá xong phải tải lại đều chuyển sang REVIEW (bạn tự chọn).

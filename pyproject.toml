@@ -1,6 +1,6 @@
 [project]
 name = "mac-dev-cleaner"
-version = "0.2.0"
+version = "0.3.0"
 description = "macOS disk cleaner for Flutter, mobile and AI developers that never breaks ongoing work or forces re-downloads."
 authors = [{ name = "Duong Yi" }]
 readme = "README.md"

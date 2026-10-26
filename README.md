@@ -20,18 +20,17 @@
 
 Yêu cầu: macOS và Python 3.9 trở lên (Python có sẵn của macOS là đủ).
 
-**Cách 1: clone repo** (lần chạy đầu tự tạo môi trường ảo trong thư mục repo):
+**Một lệnh duy nhất** (tự tải về `~/.mclean`, cài thư viện, thêm lệnh `mclean` vào PATH, rồi hỏi có bật lịch tự động không):
 ```bash
-git clone https://github.com/DuongYi/cleanMacOs.git
-cd cleanMacOs
-./mclean scan                                # xem có gì dọn được, không xoá gì
-mkdir -p ~/.local/bin && ln -sf "$PWD/mclean" ~/.local/bin/mclean   # gọi `mclean` từ mọi nơi
+curl -fsSL https://raw.githubusercontent.com/DuongYi/cleanMacOs/main/install.sh | bash
 ```
 
-**Cách 2: pipx**
-```bash
-pipx install git+https://github.com/DuongYi/cleanMacOs.git
-```
+| Việc cần làm | Lệnh |
+| :--- | :--- |
+| Cập nhật bản mới | `mclean update` |
+| Gỡ cài đặt (tắt lịch chạy ngầm, xoá lệnh và `~/.mclean`; giữ cấu hình) | `curl -fsSL https://raw.githubusercontent.com/DuongYi/cleanMacOs/main/install.sh \| bash -s -- --uninstall` |
+| Cài từ bản clone có sẵn (dùng luôn thư mục đó) | `git clone https://github.com/DuongYi/cleanMacOs.git && cd cleanMacOs && ./install.sh` |
+| Cài bằng pipx | `pipx install git+https://github.com/DuongYi/cleanMacOs.git` (cập nhật: `pipx upgrade mac-dev-cleaner`) |
 
 Sau đó:
 ```bash

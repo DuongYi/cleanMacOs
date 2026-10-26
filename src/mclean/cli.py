@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -518,6 +519,42 @@ def ignore(
             console.print(f"[green]Đã xoá khỏi danh sách bảo vệ: {p}[/green]")
         else:
             console.print("[yellow]Đường dẫn không có trong danh sách bảo vệ.[/yellow]")
+
+
+@app.command()
+def update():
+    """⬆️  Cập nhật mclean lên bản mới nhất từ GitHub."""
+    repo = Path(__file__).resolve().parents[2]
+    if not (repo / ".git").exists() or not (repo / "pyproject.toml").exists():
+        console.print("[yellow]Bản mclean này không được cài từ git.[/yellow] Nếu cài bằng pipx: [bold cyan]pipx upgrade mac-dev-cleaner[/bold cyan]")
+        raise typer.Exit(code=1)
+
+    with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
+        progress.add_task("Đang tải bản mới...", total=None)
+        pull = subprocess.run(["git", "-C", str(repo), "pull", "--ff-only"], capture_output=True, text=True)
+    if pull.returncode != 0:
+        console.print(f"[red]Không cập nhật được mã nguồn tại {repo}:[/red]\n{pull.stderr.strip()}")
+        console.print("[dim]Thường do có thay đổi chưa commit trong thư mục đó. Xem bằng: git -C {repo} status[/dim]".replace("{repo}", str(repo)))
+        raise typer.Exit(code=1)
+
+    with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
+        progress.add_task("Đang cài thư viện...", total=None)
+        pip = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--quiet", "--disable-pip-version-check", "-e", str(repo)],
+            capture_output=True, text=True,
+        )
+    if pip.returncode != 0:
+        console.print(f"[red]Cài thư viện thất bại:[/red]\n{pip.stderr.strip()[-1500:]}")
+        raise typer.Exit(code=1)
+
+    # This process still has the old module loaded, so read the new version from disk
+    match = re.search(r'__version__ = "([^"]+)"', (repo / "src" / "mclean" / "__init__.py").read_text(encoding="utf-8"))
+    new_version = match.group(1) if match else "?"
+    if new_version == __version__:
+        console.print(f"[green]✅ Đã là bản mới nhất ({__version__}).[/green]")
+    else:
+        console.print(f"[bold green]🎉 Đã cập nhật mclean {__version__} → {new_version}.[/bold green] Xem thay đổi trong {repo / 'CHANGELOG.md'}")
+    console.print("[dim]Chạy `mclean doctor` để kiểm tra lịch chạy ngầm có cần cài lại không.[/dim]")
 
 
 @app.command()

@@ -16,23 +16,26 @@ from rich.progress import (
 )
 from rich.table import Table
 
+from mclean.cleaner import execute_clean, split_by_running_apps
+from mclean.cli import print_blocked, remove_user_files, select_installers
 from mclean.models import CleanTarget
 from mclean.scanners.ai_python import AiPythonScanner
 from mclean.scanners.android_java import AndroidJavaScanner
 from mclean.scanners.apple_xcode import AppleXcodeScanner
+from mclean.scanners.browsers import BrowserScanner
 from mclean.scanners.docker import DockerScanner, run_docker_prune
 from mclean.scanners.flutter_dart import FlutterDartScanner
 from mclean.scanners.installer import scan_installers
 from mclean.scanners.large_files import find_large_files, reveal_in_finder
 from mclean.scanners.optimizer import run_all_optimizations
+from mclean.scanners.project_deps import ProjectDepsScanner
 from mclean.scanners.system_junk import SystemJunkScanner
-from mclean.utils.disk import get_disk_space, safe_delete_path
+from mclean.utils.disk import get_disk_space
 from mclean.utils.formatters import format_size, format_timestamp
 from mclean.utils.guard import get_active_dev_processes
 from mclean.utils.history import (
     get_total_lifetime_savings,
     load_history,
-    record_cleanup,
 )
 from mclean.utils.scheduler import (
     get_schedule_status,
@@ -79,9 +82,11 @@ def scan_with_live_progress() -> List[CleanTarget]:
         ("Xcode & iOS Simulators", AppleXcodeScanner()),
         ("Android SDK & Gradle Caches", AndroidJavaScanner()),
         ("Flutter Projects Cũ (>14 ngày)", FlutterDartScanner()),
+        ("node_modules & Pods của dự án cũ", ProjectDepsScanner()),
         ("AI Models & Python Caches", AiPythonScanner()),
         ("Docker & Container Files", DockerScanner()),
         ("System Junk & Package Managers", SystemJunkScanner()),
+        ("Cache trình duyệt", BrowserScanner()),
     ]
 
     all_targets: List[CleanTarget] = []
@@ -148,26 +153,26 @@ def display_summary_table(targets: List[CleanTarget]):
     console.print()
     console.print(
         f"🟢 [bold green]Tier 1 (SAFE): {format_size(total_safe)}[/bold green] "
-        f"— 100% An toàn, dọn xong [bold underline]KHÔNG BAO GIỜ phải tải lại dữ liệu[/bold underline]."
+        f"— Chỉ gồm dữ liệu tự tạo lại tại máy hoặc không dự án nào dùng: dọn xong [bold underline]không phải tải lại[/bold underline]."
     )
     console.print(
         f"🟡 [bold yellow]Tier 2 (REVIEW): {format_size(total_review)}[/bold yellow] "
-        f"— Model AI, máy ảo cũ (chọn lọc từng mục trước khi xoá)."
+        f"— Model AI, máy ảo, cache tải về: xoá thì lần sau phải tải lại (chọn lọc từng mục)."
     )
     console.print()
 
 
 def clean_targets_with_progress(targets_to_clean: List[CleanTarget]) -> int:
-    """Clean targets with live progress bar."""
+    """Clean targets with live progress bar, skipping anything an open app is using."""
+    targets_to_clean, blocked = split_by_running_apps(targets_to_clean)
+    if blocked:
+        print_blocked(blocked)
     if not targets_to_clean:
-        console.print("[yellow]Không có mục nào được chọn để dọn.[/yellow]")
+        console.print("[yellow]Không có mục nào dọn được lúc này.[/yellow]")
         return 0
 
     total_bytes = sum(t.size_bytes for t in targets_to_clean)
     console.print(f"\n[bold green]🚀 Bắt đầu dọn {len(targets_to_clean)} mục ({format_size(total_bytes)})...[/bold green]")
-
-    reclaimed = 0
-    cleaner = AppleXcodeScanner()
 
     with Progress(
         SpinnerColumn(),
@@ -178,19 +183,22 @@ def clean_targets_with_progress(targets_to_clean: List[CleanTarget]) -> int:
     ) as progress:
         task = progress.add_task("Đang dọn dẹp...", total=len(targets_to_clean))
 
-        for t in targets_to_clean:
+        started: List[CleanTarget] = []
+
+        def on_start(t: CleanTarget) -> None:
+            if started:
+                progress.advance(task)
+            started.append(t)
             progress.update(task, description=f"Đang dọn: [white]{t.name}[/white]")
-            ok, _ = cleaner.clean(t, dry_run=False)
-            if ok:
-                reclaimed += t.size_bytes
-            progress.advance(task)
 
-    if reclaimed > 0:
-        record_cleanup(reclaimed, [t.name for t in targets_to_clean])
+        report = execute_clean(targets_to_clean, on_start=on_start)
+        progress.update(task, completed=len(targets_to_clean))
 
-    console.print(f"\n[bold green]🎉 Hoàn tất![/bold green] Đã giải phóng thành công: [bold green]{format_size(reclaimed)}[/bold green]\n")
+    for t, msg in report.failed:
+        console.print(f"[red]✗ {t.name}: {msg}[/red]")
+    console.print(f"\n[bold green]🎉 Hoàn tất![/bold green] Đã giải phóng thực tế: [bold green]{format_size(report.reclaimed)}[/bold green]\n")
     print_header()
-    return reclaimed
+    return report.reclaimed
 
 
 def interactive_dashboard_menu():
@@ -206,7 +214,7 @@ def interactive_dashboard_menu():
         choice = questionary.select(
             "Chọn thao tác bạn muốn thực hiện (Dùng phím mũi tên ↑/↓ và bấm Enter):",
             choices=[
-                "1. 🧹 Dọn nhanh toàn bộ mục SAFE (Không bao giờ phải tải lại dữ liệu)",
+                "1. 🧹 Dọn nhanh toàn bộ mục SAFE (không phải tải lại, bỏ qua mục ứng dụng đang dùng)",
                 "2. 🎯 Chọn lọc từng mục (Duyệt chi tiết Model AI, Simulators, AVD)",
                 "3. 🚀 Tối ưu hệ thống (Làm mới DNS, QuickLook, chặn rác .DS_Store)",
                 "4. 📦 Dọn tệp cài đặt & mobile builds trong Downloads",
@@ -277,16 +285,9 @@ def interactive_dashboard_menu():
                     table.add_row(t.name, format_size(t.size_bytes), "[green]SAFE[/green]" if t.is_safe else "[yellow]REVIEW[/yellow]")
                 console.print(table)
 
-                total_ins = sum(t.size_bytes for t in installer_targets)
-                if questionary.confirm(f"Dọn {len(installer_targets)} tệp cài đặt ({format_size(total_ins)})?", default=True).ask():
-                    cleaned = 0
-                    for t in installer_targets:
-                        ok, _ = safe_delete_path(t.path)
-                        if ok:
-                            cleaned += t.size_bytes
-                    if cleaned > 0:
-                        record_cleanup(cleaned, [t.name for t in installer_targets])
-                    console.print(f"[bold green]🎉 Đã giải phóng: {format_size(cleaned)}[/bold green]\n")
+                selected = select_installers(installer_targets)
+                if selected:
+                    remove_user_files([(t.path, t.size_bytes) for t in selected])
 
         elif "5. 🐘 Quét tệp siêu lớn" in choice:
             console.print("\n[bold cyan]🔍 Đang quét các tệp >= 500 MB trong thư mục của bạn...[/bold cyan]")
@@ -311,23 +312,21 @@ def interactive_dashboard_menu():
                 if chosen_file:
                     act = questionary.select(
                         f"Thao tác cho {chosen_file.path.name}:",
-                        choices=["1. 📂 Mở vị trí tệp trong Finder", "2. 🗑️ Xoá tệp này", "3. ❌ Huỷ"],
+                        choices=["1. 📂 Mở vị trí tệp trong Finder", "2. 🗑️ Dọn tệp này", "3. ❌ Huỷ"],
                     ).ask()
+                    if not act:
+                        continue
                     if "1. 📂 Mở" in act:
                         reveal_in_finder(chosen_file.path)
-                    elif "2. 🗑️ Xoá" in act:
-                        if questionary.confirm(f"Xoá tệp {chosen_file.path.name}?", default=False).ask():
-                            ok, _ = safe_delete_path(chosen_file.path)
-                            if ok:
-                                record_cleanup(chosen_file.size_bytes, [chosen_file.path.name])
-                                console.print(f"[bold green]🎉 Đã giải phóng: {format_size(chosen_file.size_bytes)}[/bold green]\n")
+                    elif "2. 🗑️ Dọn" in act:
+                        remove_user_files([(chosen_file.path, chosen_file.size_bytes)])
 
         elif "6. 🐳 Dọn dẹp Docker" in choice:
             scanner = DockerScanner()
             if not scanner.is_docker_running():
                 console.print("[yellow]Docker daemon hiện đang tắt.[/yellow]\n")
             else:
-                if questionary.confirm("Chạy Docker prune để dọn build cache & dangling images?", default=True).ask():
+                if questionary.confirm("Dọn dangling images và build cache không dùng > 30 ngày?", default=True).ask():
                     ok, output = run_docker_prune()
                     console.print(Panel(output, title="Docker Prune Result", border_style="green" if ok else "red"))
 
@@ -350,6 +349,8 @@ def interactive_dashboard_menu():
             info = get_schedule_status()
             console.print(f"Trạng thái hiện tại: [bold cyan]{info.get('status')}[/bold cyan]")
             sched_act = questionary.select("Tuỳ chọn lịch:", choices=["1. ✅ Kích hoạt lịch dọn tự động mỗi sáng Thứ Hai", "2. ❌ Huỷ bỏ lịch dọn ngầm", "3. ↩️ Quay lại"]).ask()
+            if not sched_act:
+                continue
             if "1. ✅ Kích hoạt" in sched_act:
                 ok, msg = install_schedule(weekday=1, hour=9, minute=0)
                 console.print(f"[bold green]{msg}[/bold green]\n")

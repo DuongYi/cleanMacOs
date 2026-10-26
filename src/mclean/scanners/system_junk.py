@@ -1,17 +1,18 @@
 """System junk, package managers, and trash scanner."""
 
-import os
-import subprocess
 from pathlib import Path
 from typing import List
 
 from mclean.models import Category, CleanTarget, RiskTier
 from mclean.scanners.base import BaseScanner
-from mclean.utils.disk import get_batch_sizes, get_path_size
+from mclean.utils.disk import find_tool, get_batch_sizes, get_path_size
+
+# Subfolders of ~/Library/Logs that have their own target
+LOGS_LISTED_ELSEWHERE = {"DiagnosticReports", "CoreSimulator", "OrbStack"}
 
 
 class SystemJunkScanner(BaseScanner):
-    """Scans npm, Homebrew, Docker logs, system diagnostic reports, and Trash."""
+    """Scans npm, Homebrew, pnpm, app logs, system diagnostic reports, and Trash."""
 
     @property
     def name(self) -> str:
@@ -25,41 +26,84 @@ class SystemJunkScanner(BaseScanner):
         home = Path.home()
         targets: List[CleanTarget] = []
 
-        # 1. Package Manager Caches (TIER 1 - 100% Safe)
+        # 1. Package manager download caches (TIER 2): existing installs keep working,
+        # but the next install that needs these packages downloads them again.
         pkg_caches = [
-            ("Homebrew Download Cache", home / "Library" / "Caches" / "Homebrew", "Downloaded formula and bottle tarballs", Category.DEV),
-            ("npm Cache", home / ".npm" / "_cacache", "Content-addressable download tarballs cache", Category.DEV),
+            ("npm Cache", home / ".npm" / "_cacache", "npm download cache. Re-downloaded on the next install that needs it."),
+            ("Yarn Cache", home / "Library" / "Caches" / "Yarn", "Yarn download cache. Re-downloaded on the next install that needs it."),
+            ("Bun Install Cache", home / ".bun" / "install" / "cache", "Bun download cache. Re-downloaded on the next install that needs it."),
+        ]
+        # 2. Logs (TIER 1)
+        log_paths = [
             ("npm Logs", home / ".npm" / "_logs", "Debug log files from past npm runs", Category.DEV),
-            ("Yarn Cache", home / "Library" / "Caches" / "Yarn", "Yarn downloaded package tarballs", Category.DEV),
-            ("pnpm Store Cache", home / ".pnpm-store", "Cached pnpm package tarballs", Category.DEV),
-            ("Bun Install Cache", home / ".bun" / "install" / "cache", "Bun package manager download cache", Category.DEV),
-            ("Docker Desktop Logs", home / "Library" / "Containers" / "com.docker.docker" / "Data" / "log", "Docker VM and engine log files", Category.DEV),
             ("OrbStack Logs", home / "Library" / "Logs" / "OrbStack", "OrbStack virtualization logs", Category.DEV),
-        ]
-
-        # 2. System Logs and Crash Dumps (TIER 1 - Safe)
-        system_caches = [
             ("macOS Crash Reports", home / "Library" / "Logs" / "DiagnosticReports", "Old app crash dumps and diagnostic traces", Category.SYSTEM),
-            ("macOS User Logs", home / "Library" / "Logs", "Application execution logs", Category.SYSTEM),
         ]
 
-        # Check all candidate paths concurrently
-        all_candidates = pkg_caches + system_caches
-        sizes = get_batch_sizes([p for _, p, _, _ in all_candidates])
+        sizes = get_batch_sizes([p for _, p, _ in pkg_caches] + [p for _, p, _, _ in log_paths])
 
-        for name, path, desc, cat in all_candidates:
+        for name, path, desc in pkg_caches:
             size = sizes.get(path, 0)
-            if size > 10 * 1024 * 1024:  # > 10MB
+            if size > 10 * 1024 * 1024:
                 targets.append(CleanTarget(
-                    name=name,
-                    category=cat,
-                    path=path,
-                    size_bytes=size,
-                    risk_tier=RiskTier.TIER1_SAFE,
-                    description=desc,
+                    name=name, category=Category.DEV, path=path, size_bytes=size,
+                    risk_tier=RiskTier.TIER2_REVIEW, description=desc,
                 ))
 
-        # 3. macOS Trash (TIER 1 - Safe)
+        for name, path, desc, cat in log_paths:
+            size = sizes.get(path, 0)
+            if size > 10 * 1024 * 1024:
+                targets.append(CleanTarget(
+                    name=name, category=cat, path=path, size_bytes=size,
+                    risk_tier=RiskTier.TIER1_SAFE, description=desc,
+                ))
+
+        # Remaining app logs, excluding folders listed separately above or by other scanners
+        logs_root = home / "Library" / "Logs"
+        if logs_root.is_dir():
+            other_logs = [c for c in _children(logs_root) if c.name not in LOGS_LISTED_ELSEWHERE]
+            other_size = sum(get_batch_sizes(other_logs).values())
+            if other_size > 10 * 1024 * 1024:
+                targets.append(CleanTarget(
+                    name="macOS App Logs",
+                    category=Category.SYSTEM,
+                    path=logs_root,
+                    size_bytes=other_size,
+                    risk_tier=RiskTier.TIER1_SAFE,
+                    description="Application execution logs in ~/Library/Logs",
+                    item_type="contents",
+                    metadata={"exclude": sorted(LOGS_LISTED_ELSEWHERE)},
+                ))
+
+        # 3. Homebrew: its own cleanup keeps every installed version's files
+        brew = find_tool("brew")
+        if brew:
+            targets.append(CleanTarget(
+                name="Homebrew: Cleanup Outdated",
+                category=Category.DEV,
+                path=home / "Library" / "Caches" / "Homebrew",
+                size_bytes=0,
+                risk_tier=RiskTier.TIER1_SAFE,
+                description="Runs 'brew cleanup': removes old versions and stale downloads only.",
+                item_type="command",
+                clean_command=[brew, "cleanup"],
+            ))
+
+        # 4. pnpm: its own prune removes only packages no project references
+        pnpm = find_tool("pnpm")
+        if pnpm:
+            targets.append(CleanTarget(
+                name="pnpm Store: Prune Unreferenced",
+                category=Category.DEV,
+                path=home / "Library" / "pnpm" / "store",
+                size_bytes=0,
+                risk_tier=RiskTier.TIER1_SAFE,
+                description="Runs 'pnpm store prune': removes only packages no project references.",
+                item_type="command",
+                clean_command=[pnpm, "store", "prune"],
+            ))
+
+        # 5. macOS Trash (TIER 1 - the user already chose to throw these away)
         trash = home / ".Trash"
         if trash.exists():
             trash_size = get_path_size(trash)
@@ -71,8 +115,14 @@ class SystemJunkScanner(BaseScanner):
                     size_bytes=trash_size,
                     risk_tier=RiskTier.TIER1_SAFE,
                     description="Files moved to the Trash bin.",
-                    item_type="command",
-                    clean_command=["rm", "-rf", str(trash / "*")],
+                    item_type="contents",
                 ))
 
         return targets
+
+
+def _children(path: Path) -> List[Path]:
+    try:
+        return list(path.iterdir())
+    except OSError:
+        return []

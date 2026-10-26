@@ -60,19 +60,65 @@ def save_ignored_paths(ignored: Set[Path]):
         json.dump({"ignored": [str(p) for p in sorted(ignored)]}, f, indent=2)
 
 
-def is_path_protected(path: Path) -> bool:
-    """Check if a path is blacklisted or in the user's ignore list."""
+# Directories that must never be removed as a whole (their contents may be)
+CRITICAL_ROOTS = {
+    Path("/"),
+    Path("/Users"),
+    Path.home(),
+    Path.home() / "Library",
+    Path.home() / "Documents",
+    Path.home() / "Desktop",
+    Path.home() / "Downloads",
+    Path.home() / "Developer",
+}
+
+# Inside ~/.android/avd only these entries are disposable; everything else is device data
+AVD_DISPOSABLE_NAMES = {"snapshots"}
+AVD_DISPOSABLE_PREFIXES = ("cache.img",)
+
+
+def _is_avd_disposable(resolved: Path) -> bool:
+    """True for snapshots/ and cache.img* directly inside an *.avd folder."""
+    parent = resolved.parent
+    if not parent.name.endswith(".avd") or parent.parent != (Path.home() / ".android" / "avd").resolve():
+        return False
+    return resolved.name in AVD_DISPOSABLE_NAMES or resolved.name.startswith(AVD_DISPOSABLE_PREFIXES)
+
+
+def _matches_guard(resolved: Path, guarded: Path) -> bool:
+    """A path is guarded if it is the guarded path, inside it, or one of its ancestors."""
+    guarded = guarded.expanduser().resolve()
+    return resolved == guarded or guarded in resolved.parents or resolved in guarded.parents
+
+
+def is_path_ignored(path: Path) -> bool:
+    """True if the path is on, or inside, the user's ignore list. Used to decide what to scan at all."""
     resolved = path.expanduser().resolve()
+    return any(resolved == ig or ig in resolved.parents for ig in load_ignored_paths())
+
+
+def is_path_protected(path: Path) -> bool:
+    """Check if a path is blacklisted or in the user's ignore list.
+
+    Deleting an ancestor of a protected path would delete the protected path too,
+    so ancestors are protected as well.
+    """
+    resolved = path.expanduser().resolve()
+
+    if resolved in {r.resolve() for r in CRITICAL_ROOTS}:
+        return True
+
+    # Check user ignore list
+    for ig in load_ignored_paths():
+        if _matches_guard(resolved, ig):
+            return True
+
+    if _is_avd_disposable(resolved):
+        return False
 
     # Check permanent blacklist
     for bl in PERMANENT_BLACKLIST:
-        if resolved == bl or bl in resolved.parents:
-            return True
-
-    # Check user ignore list
-    user_ignored = load_ignored_paths()
-    for ig in user_ignored:
-        if resolved == ig or ig in resolved.parents:
+        if _matches_guard(resolved, bl):
             return True
 
     return False

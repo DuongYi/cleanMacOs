@@ -1,8 +1,9 @@
 """mclean: macOS Developer & AI Precision Cleaner CLI Interface."""
 
-import shutil
+import json
+import subprocess
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import questionary
 import typer
@@ -11,6 +12,7 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
+from mclean.cleaner import execute_clean, split_by_running_apps
 from mclean.config import (
     DEFAULT_INACTIVE_DAYS,
     DEFAULT_PROJECT_ROOTS,
@@ -21,15 +23,17 @@ from mclean.models import Category, CleanTarget, RiskTier
 from mclean.scanners.ai_python import AiPythonScanner
 from mclean.scanners.android_java import AndroidJavaScanner
 from mclean.scanners.apple_xcode import AppleXcodeScanner
+from mclean.scanners.browsers import BrowserScanner
 from mclean.scanners.docker import DockerScanner, run_docker_prune
 from mclean.scanners.flutter_dart import FlutterDartScanner
 from mclean.scanners.installer import scan_installers
 from mclean.scanners.large_files import find_large_files, reveal_in_finder
 from mclean.scanners.optimizer import run_all_optimizations
+from mclean.scanners.project_deps import ProjectDepsScanner
 from mclean.scanners.system_junk import SystemJunkScanner
-from mclean.utils.disk import get_disk_space, get_path_size, safe_delete_path
+from mclean.utils.disk import get_disk_space, get_path_size, move_to_trash, safe_delete_path
 from mclean.utils.formatters import format_size, format_timestamp
-from mclean.utils.guard import check_conflicts_for_category, get_active_dev_processes
+from mclean.utils.guard import get_active_dev_processes
 from mclean.utils.history import (
     clear_history,
     get_total_lifetime_savings,
@@ -66,9 +70,11 @@ def run_all_scanners(workspace_roots: Optional[List[Path]] = None) -> List[Clean
         AppleXcodeScanner(),
         AndroidJavaScanner(),
         FlutterDartScanner(workspace_roots=workspace_roots),
+        ProjectDepsScanner(workspace_roots=workspace_roots),
         AiPythonScanner(),
         DockerScanner(),
         SystemJunkScanner(),
+        BrowserScanner(),
     ]
 
     all_targets: List[CleanTarget] = []
@@ -166,48 +172,68 @@ def scan(
     console.print()
     console.print(
         f"🟢 [bold green]Tier 1 (SAFE): {format_size(total_safe)}[/bold green] "
-        f"— 100% An toàn, dọn xong [bold underline]KHÔNG BAO GIỜ phải tải lại dữ liệu[/bold underline]."
+        f"— Chỉ gồm dữ liệu tự tạo lại tại máy hoặc không dự án nào dùng: dọn xong [bold underline]không phải tải lại[/bold underline]."
     )
     console.print(
         f"🟡 [bold yellow]Tier 2 (REVIEW): {format_size(total_review)}[/bold yellow] "
-        f"— Model AI, máy ảo cũ (dùng [bold cyan]mclean interactive[/bold cyan] để chọn xoá từng mục)."
+        f"— Model AI, máy ảo, cache tải về: xoá thì lần sau phải tải lại (dùng [bold cyan]mclean interactive[/bold cyan] để chọn từng mục)."
     )
     console.print("\n💡 Gõ [bold cyan]mclean clean[/bold cyan] để dọn ngay các mục SAFE.")
+
+
+CATEGORY_KEYS = {
+    "xcode": Category.XCODE,
+    "android": Category.ANDROID,
+    "flutter": Category.FLUTTER,
+    "ai": Category.AI,
+    "dev": Category.DEV,
+    "system": Category.SYSTEM,
+    "trash": Category.TRASH,
+    "browser": Category.BROWSER,
+}
+
+
+def notify_macos(title: str, message: str) -> None:
+    """Show a macOS notification (used by the scheduled job)."""
+    script = f"display notification {json.dumps(message)} with title {json.dumps(title)}"
+    subprocess.run(["osascript", "-e", script], capture_output=True, check=False)
+
+
+def print_blocked(blocked) -> None:
+    console.print("\n[bold yellow]⏸  Tạm bỏ qua vì ứng dụng đang dùng:[/bold yellow]")
+    for t, conflicts in blocked:
+        console.print(f"  • {t.name} [dim]({format_size(t.size_bytes)}) ← {', '.join(conflicts)}[/dim]")
+    console.print("[dim]    Đóng các ứng dụng này rồi chạy lại để dọn nốt.[/dim]")
 
 
 @app.command()
 def clean(
     category: Optional[str] = typer.Argument(
-        None, help="Phân loại muốn dọn: dev, xcode, android, flutter, ai, system, trash, hoặc bỏ trống để dọn tất cả SAFE"
+        None, help="Phân loại muốn dọn: xcode, android, flutter, ai, dev, system, trash, browser, hoặc bỏ trống để dọn tất cả SAFE"
     ),
     dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Chạy giả lập kiểm tra, không xoá file thật"),
     interactive: bool = typer.Option(False, "--interactive", "-i", help="Bật menu chọn lọc để duyệt từng Model AI và máy ảo"),
-    force: bool = typer.Option(False, "--force", "-f", help="Bỏ qua xác nhận xác nhận xóa"),
+    force: bool = typer.Option(False, "--force", "-f", help="Bỏ qua câu hỏi xác nhận (mục đang được ứng dụng dùng vẫn luôn bị bỏ qua)"),
+    notify: bool = typer.Option(False, "--notify", help="Gửi thông báo macOS khi xong (dùng cho lịch tự động)"),
 ):
     """🧹 Dọn dẹp an toàn các vùng nhớ đệm mà không gây vòng lặp tải lại."""
+    if category and category.lower() not in CATEGORY_KEYS:
+        console.print(f"[red]Không có phân loại '{category}'. Chọn một trong: {', '.join(CATEGORY_KEYS)}[/red]")
+        raise typer.Exit(code=2)
+
     print_disk_banner()
 
     with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
         progress.add_task(description="Đang kiểm tra các mục có thể dọn dẹp...", total=None)
         all_targets = run_all_scanners()
 
-    # Filter by category if specified
     if category:
-        cat_lower = category.lower()
-        all_targets = [t for t in all_targets if cat_lower in t.category.value.lower() or cat_lower in t.name.lower()]
+        wanted = CATEGORY_KEYS[category.lower()]
+        all_targets = [t for t in all_targets if t.category == wanted]
 
     if not all_targets:
         console.print("[green]✨ Không có mục nào cần dọn dẹp trong danh mục này![/green]")
         return
-
-    # Check for process conflicts
-    if category:
-        conflicts = check_conflicts_for_category(category)
-        if conflicts:
-            console.print(f"[bold red]⚠️  Cảnh báo:[/bold red] Các ứng dụng sau đang mở: {', '.join(conflicts)}")
-            if not force and not questionary.confirm("Bạn có chắc chắn muốn tiếp tục dọn không?", default=False).ask():
-                console.print("[yellow]Đã huỷ dọn dẹp để bảo vệ ứng dụng đang chạy.[/yellow]")
-                return
 
     # Handle Interactive mode (Questionary)
     if interactive:
@@ -235,6 +261,16 @@ def clean(
             console.print("[yellow]Không có mục SAFE nào cần dọn. (Dùng `mclean clean -i` để chọn các mục REVIEW).[/yellow]")
             return
 
+    # Never delete what an open IDE, emulator or daemon is using
+    targets_to_clean, blocked = split_by_running_apps(targets_to_clean)
+    if blocked:
+        print_blocked(blocked)
+    if not targets_to_clean:
+        console.print("[yellow]Không còn mục nào dọn được lúc này.[/yellow]")
+        if notify:
+            notify_macos("mclean Auto-Clean", "Đã bỏ qua: các ứng dụng phát triển đang mở.")
+        return
+
     total_reclaimable = sum(t.size_bytes for t in targets_to_clean)
 
     if dry_run:
@@ -251,19 +287,18 @@ def clean(
             return
 
     # Perform cleaning
-    reclaimed = 0
     with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
-        for t in targets_to_clean:
-            task = progress.add_task(description=f"Đang dọn {t.name}...", total=None)
-            success, msg = AppleXcodeScanner().clean(t, dry_run=False)
-            if success:
-                reclaimed += t.size_bytes
-            progress.remove_task(task)
+        task = progress.add_task(description="Đang dọn...", total=None)
+        report = execute_clean(
+            targets_to_clean,
+            on_start=lambda t: progress.update(task, description=f"Đang dọn {t.name}..."),
+        )
 
-    if reclaimed > 0:
-        record_cleanup(reclaimed, [t.name for t in targets_to_clean])
-
-    console.print(f"\n[bold green]🎉 Hoàn tất![/bold green] Đã giải phóng thành công: [bold green]{format_size(reclaimed)}[/bold green]")
+    for t, msg in report.failed:
+        console.print(f"[red]✗ {t.name}: {msg}[/red]")
+    console.print(f"\n[bold green]🎉 Hoàn tất![/bold green] Đã giải phóng thực tế: [bold green]{format_size(report.reclaimed)}[/bold green]")
+    if notify:
+        notify_macos("mclean Auto-Clean", f"Đã giải phóng {format_size(report.reclaimed)}, {len(report.failed)} mục lỗi, {len(blocked)} mục bỏ qua.")
     print_disk_banner()
 
 
@@ -283,42 +318,59 @@ def purge(
     ),
     dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Chạy thử không xoá file thật"),
 ):
-    """🗑️  Quét sâu các thư mục dự án (Flutter, Node, Python) và dọn build/, .dart_tool/, node_modules/ cũ."""
+    """🗑️  Quét các dự án lâu không đụng tới: build Flutter (SAFE), node_modules và Pods (bạn chọn)."""
     scan_root = Path(path).expanduser().resolve() if path else Path.home() / "Desktop"
-    console.print(f"[bold cyan]🔍 Quét dọn các build artifacts không hoạt động trong > {older_than} ngày tại: {scan_root}[/bold cyan]")
+    console.print(f"[bold cyan]🔍 Quét các dự án không hoạt động trong > {older_than} ngày tại: {scan_root}[/bold cyan]")
 
-    scanner = FlutterDartScanner(workspace_roots=[scan_root], inactive_days=older_than)
-    targets = scanner.scan_workspace_for_inactive_projects(scan_root, older_than)
+    with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
+        progress.add_task("Đang quét dự án...", total=None)
+        targets = FlutterDartScanner(workspace_roots=[scan_root], inactive_days=older_than).scan_workspace_for_inactive_projects(scan_root, older_than)
+        targets += ProjectDepsScanner(workspace_roots=[scan_root], inactive_days=older_than).scan_root(scan_root)
+    targets.sort(key=lambda t: t.size_bytes, reverse=True)
 
     if not targets:
-        console.print("[green]✨ Không tìm thấy build artifacts cũ nào cần purge![/green]")
+        console.print("[green]✨ Không tìm thấy dự án cũ nào cần dọn![/green]")
         return
 
     table = Table(title="Dự Án Không Hoạt Động Có Thể Dọn Dẹp")
-    table.add_column("Dự án", style="cyan")
+    table.add_column("Mục", style="cyan")
     table.add_column("Đường dẫn", style="dim")
     table.add_column("Dung lượng", justify="right", style="bold yellow")
-    table.add_column("Trạng thái", justify="center")
+    table.add_column("Mức độ", justify="center")
 
-    total_size = sum(t.size_bytes for t in targets)
     for t in targets:
-        table.add_row(t.name, str(t.path), format_size(t.size_bytes), "[green]SAFE[/green]")
+        badge = "[green]SAFE[/green]" if t.is_safe else "[yellow]REVIEW[/yellow]"
+        table.add_row(t.name, str(t.metadata.get("project_path", t.path)), format_size(t.size_bytes), badge)
 
     console.print(table)
-    console.print(f"\nTổng dung lượng có thể giải phóng: [bold green]{format_size(total_size)}[/bold green]")
+    console.print(
+        f"\nSAFE (build, không phải tải lại): [bold green]{format_size(sum(t.size_bytes for t in targets if t.is_safe))}[/bold green] | "
+        f"REVIEW (node_modules/Pods, cài lại có thể tải): [bold yellow]{format_size(sum(t.size_bytes for t in targets if not t.is_safe))}[/bold yellow]"
+    )
 
     if dry_run:
         console.print("[cyan][Dry-run] Kết thúc quét thử nghiệm.[/cyan]")
         return
 
-    if questionary.confirm("Bạn có muốn dọn dẹp các thư mục build cũ này không?", default=True).ask():
-        cleaned = 0
-        for t in targets:
-            ok, _ = safe_delete_path(t.path)
-            if ok:
-                cleaned += t.size_bytes
-        console.print(f"[bold green]🎉 Đã giải phóng: {format_size(cleaned)}[/bold green]")
+    selected = questionary.checkbox(
+        "Chọn mục muốn dọn (SPACE để chọn, Enter để xác nhận). Chỉ mục SAFE được chọn sẵn:",
+        choices=[
+            questionary.Choice(
+                title=f"{'[SAFE]' if t.is_safe else '[REVIEW]'} {t.name} ({format_size(t.size_bytes)})",
+                value=t,
+                checked=t.is_safe,
+            )
+            for t in targets
+        ],
+    ).ask()
+    if not selected:
+        console.print("[yellow]Chưa chọn mục nào. Không xoá gì.[/yellow]")
+        return
 
+    report = execute_clean(selected)
+    for t, msg in report.failed:
+        console.print(f"[red]✗ {t.name}: {msg}[/red]")
+    console.print(f"[bold green]🎉 Đã giải phóng: {format_size(report.reclaimed)}[/bold green]")
 
 @app.command()
 def analyze(
@@ -453,14 +505,62 @@ def installer(
         console.print("[cyan][Dry-run] Kết thúc chạy thử nghiệm.[/cyan]")
         return
 
-    if questionary.confirm("Bạn có muốn xoá các tệp cài đặt đã chọn không?", default=True).ask():
-        cleaned = 0
-        for t in targets:
-            ok, _ = safe_delete_path(t.path)
-            if ok:
-                cleaned += t.size_bytes
-        console.print(f"[bold green]🎉 Đã giải phóng: {format_size(cleaned)}[/bold green]")
+    selected = select_installers(targets)
+    if selected:
+        remove_user_files([(t.path, t.size_bytes) for t in selected])
 
+
+def select_installers(targets: List[CleanTarget]) -> List[CleanTarget]:
+    """Let the user pick installers to remove; only old installers are pre-selected."""
+    selected = questionary.checkbox(
+        "Chọn tệp muốn dọn (SPACE để chọn, Enter để xác nhận). Tệp mới và tệp nén không được chọn sẵn:",
+        choices=[
+            questionary.Choice(
+                title=f"{'[SAFE]' if t.is_safe else '[REVIEW]'} {t.path.name} ({format_size(t.size_bytes)})",
+                value=t,
+                checked=t.is_safe,
+            )
+            for t in targets
+        ],
+    ).ask()
+    if not selected:
+        console.print("[yellow]Chưa chọn tệp nào. Không xoá gì.[/yellow]")
+        return []
+    return selected
+
+
+def remove_user_files(items: List[Tuple[Path, int]]) -> None:
+    """Ask whether to move user files to the Trash (recoverable) or delete them permanently, then do it."""
+    total = sum(size for _, size in items)
+    mode = questionary.select(
+        f"Dọn {len(items)} tệp ({format_size(total)}) bằng cách nào?",
+        choices=[
+            questionary.Choice("🗑️  Chuyển vào Thùng rác (khôi phục được)", value="trash"),
+            questionary.Choice("⚠️  Xoá vĩnh viễn (giải phóng ngay)", value="delete"),
+            questionary.Choice("❌ Huỷ", value=None),
+        ],
+    ).ask()
+    if not mode:
+        return
+
+    done: List[Tuple[Path, int]] = []
+    for path, size in items:
+        ok, msg = move_to_trash(path) if mode == "trash" else safe_delete_path(path)
+        if ok:
+            done.append((path, size))
+        else:
+            console.print(f"[red]✗ {msg}[/red]")
+    freed = sum(size for _, size in done)
+
+    if mode == "trash":
+        console.print(
+            f"[bold green]🗑️  Đã chuyển {len(done)} tệp ({format_size(freed)}) vào Thùng rác.[/bold green] "
+            "[dim]Dung lượng được giải phóng khi bạn dọn Thùng rác (`mclean clean trash`).[/dim]"
+        )
+    else:
+        if freed:
+            record_cleanup(freed, [p.name for p, _ in done])
+        console.print(f"[bold green]🎉 Đã xoá vĩnh viễn {len(done)} tệp, giải phóng {format_size(freed)}[/bold green]")
 
 @app.command()
 def ui():
@@ -564,7 +664,7 @@ def schedule(
 def docker(
     all_unused: bool = typer.Option(False, "--all", "-a", help="Dọn toàn bộ container và image không dùng (deep clean)"),
 ):
-    """🐳 Dọn dẹp Docker / OrbStack: build cache, dangling images, và stopped containers."""
+    """🐳 Dọn dẹp Docker / OrbStack: dangling images và build cache cũ (--all để dọn sâu)."""
     console.print("[bold cyan]🐳 Đang kiểm tra môi trường Docker & Containers...[/bold cyan]\n")
 
     scanner = DockerScanner()
@@ -576,15 +676,16 @@ def docker(
             total_sz = sum(t.size_bytes for t in local_targets)
             console.print(f"Tìm thấy các file log tạm: [bold yellow]{format_size(total_sz)}[/bold yellow]")
             if questionary.confirm("Dọn các file log tạm này không?", default=True).ask():
-                c = 0
-                for t in local_targets:
-                    ok, _ = safe_delete_path(t.path)
-                    if ok:
-                        c += t.size_bytes
-                console.print(f"[bold green]🎉 Đã giải phóng: {format_size(c)}[/bold green]")
+                report = execute_clean(local_targets)
+                console.print(f"[bold green]🎉 Đã giải phóng: {format_size(report.reclaimed)}[/bold green]")
         return
 
-    if questionary.confirm("Tiến hành dọn build cache, dangling images và stopped containers?", default=True).ask():
+    prompt = (
+        "Deep clean: xoá MỌI image không dùng và container đã dừng (sẽ phải pull lại khi cần). Tiếp tục?"
+        if all_unused
+        else "Dọn dangling images và build cache không dùng > 30 ngày?"
+    )
+    if questionary.confirm(prompt, default=not all_unused).ask():
         with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
             task = progress.add_task("Đang dọn dẹp Docker...", total=None)
             ok, output = run_docker_prune(all_unused=all_unused)
@@ -637,37 +738,33 @@ def large_files_cmd(
     console.print(table)
     console.print(f"\nTổng dung lượng các tệp trên: [bold yellow]{format_size(total_sz)}[/bold yellow]")
 
-    if interactive or questionary.confirm("Bạn có muốn mở xem hoặc dọn bớt tệp nào không?", default=False).ask():
-        choices = [
-            questionary.Choice(
-                title=f"{it.path.name} ({format_size(it.size_bytes)}) - {it.file_type}",
-                value=it,
-            )
-            for it in items
-        ]
-        chosen = questionary.select("Chọn tệp bạn muốn thao tác:", choices=choices).ask()
-        if chosen:
-            action = questionary.select(
-                f"Thao tác cho tệp: {chosen.path.name}",
-                choices=[
-                    "1. 📂 Mở vị trí tệp trong macOS Finder",
-                    "2. 🗑️ Xoá vĩnh viễn tệp này",
-                    "3. ❌ Bỏ qua",
-                ],
-            ).ask()
+    if not interactive and not questionary.confirm("Bạn có muốn mở xem hoặc dọn bớt tệp nào không?", default=False).ask():
+        return
+    choices = [
+        questionary.Choice(
+            title=f"{it.path.name} ({format_size(it.size_bytes)}) - {it.file_type}",
+            value=it,
+        )
+        for it in items
+    ]
+    chosen = questionary.select("Chọn tệp bạn muốn thao tác:", choices=choices).ask()
+    if chosen:
+        action = questionary.select(
+            f"Thao tác cho tệp: {chosen.path.name}",
+            choices=[
+                "1. 📂 Mở vị trí tệp trong macOS Finder",
+                "2. 🗑️ Dọn tệp này",
+                "3. ❌ Bỏ qua",
+            ],
+        ).ask()
 
-            if "1. 📂 Mở" in action:
-                reveal_in_finder(chosen.path)
-                console.print(f"[green]Đã mở vị trí tệp trong Finder: {chosen.path}[/green]")
-            elif "2. 🗑️ Xoá" in action:
-                if questionary.confirm(f"Xoá vĩnh viễn tệp {chosen.path.name} ({format_size(chosen.size_bytes)})?", default=False).ask():
-                    ok, msg = safe_delete_path(chosen.path)
-                    if ok:
-                        record_cleanup(chosen.size_bytes, [chosen.path.name])
-                        console.print(f"[bold green]🎉 Đã xoá thành công! Giải phóng: {format_size(chosen.size_bytes)}[/bold green]")
-                    else:
-                        console.print(f"[red]{msg}[/red]")
-
+        if not action:
+            return
+        if "1. 📂 Mở" in action:
+            reveal_in_finder(chosen.path)
+            console.print(f"[green]Đã mở vị trí tệp trong Finder: {chosen.path}[/green]")
+        elif "2. 🗑️ Dọn" in action:
+            remove_user_files([(chosen.path, chosen.size_bytes)])
 
 if __name__ == "__main__":
     app()

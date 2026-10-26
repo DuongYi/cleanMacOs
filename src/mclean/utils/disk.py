@@ -3,9 +3,10 @@
 import os
 import shutil
 import subprocess
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Dict, Iterable, Tuple
+from typing import Dict, Iterable, Optional, Tuple
 
 from mclean.config import is_path_protected
 
@@ -92,6 +93,39 @@ def safe_delete_path(path: Path, dry_run: bool = False) -> Tuple[bool, str]:
         return False, f"Error deleting {path}: {e}"
 
     return True, "Deleted successfully"
+
+
+# launchd jobs run with a minimal PATH, so look in the usual install locations too
+TOOL_DIRS = ["/opt/homebrew/bin", "/usr/local/bin", str(Path.home() / ".local" / "bin"), str(Path.home() / ".cargo" / "bin")]
+
+
+def find_tool(name: str) -> Optional[str]:
+    """Locate a CLI tool on PATH or in common install directories."""
+    found = shutil.which(name)
+    if found:
+        return found
+    for d in TOOL_DIRS:
+        candidate = Path(d) / name
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
+
+
+def move_to_trash(path: Path) -> Tuple[bool, str]:
+    """Move a file or folder to ~/.Trash so it can still be recovered."""
+    if is_path_protected(path):
+        return False, f"Path is protected by safety blacklist: {path}"
+    if not path.exists():
+        return False, f"Path does not exist: {path}"
+    trash = Path.home() / ".Trash"
+    dest = trash / path.name
+    if dest.exists():
+        dest = trash / f"{path.stem} {time.strftime('%H.%M.%S')}{path.suffix}"
+    try:
+        shutil.move(str(path), str(dest))
+        return True, f"Moved to Trash: {path.name}"
+    except OSError as e:
+        return False, f"Error moving {path} to Trash: {e}"
 
 
 def get_disk_space() -> Tuple[int, int, int]:

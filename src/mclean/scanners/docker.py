@@ -10,6 +10,8 @@ from mclean.models import Category, CleanTarget, RiskTier
 from mclean.scanners.base import BaseScanner
 from mclean.utils.disk import get_path_size
 
+BUILD_CACHE_IDLE_HOURS = 30 * 24
+
 
 class DockerScanner(BaseScanner):
     """Scans Docker / OrbStack caches, dangling images, stopped containers, and buildx cache."""
@@ -79,9 +81,9 @@ class DockerScanner(BaseScanner):
                                 path=Path.home() / ".docker" / "buildx",
                                 size_bytes=0,
                                 risk_tier=RiskTier.TIER1_SAFE,
-                                description=f"Unused Docker build cache (Reclaimable: {reclaimable_str})",
+                                description=f"Build cache unused for {BUILD_CACHE_IDLE_HOURS // 24}+ days (total reclaimable: {reclaimable_str}). Recent layers are kept so builds stay fast.",
                                 item_type="command",
-                                clean_command=["docker", "builder", "prune", "-f"],
+                                clean_command=["docker", "builder", "prune", "-f", "--filter", f"until={BUILD_CACHE_IDLE_HOURS}h"],
                             ))
                         elif "Images" in obj_type:
                             results.append(CleanTarget(
@@ -100,8 +102,8 @@ class DockerScanner(BaseScanner):
                                 category=self.category,
                                 path=Path.home() / ".docker",
                                 size_bytes=0,
-                                risk_tier=RiskTier.TIER1_SAFE,
-                                description=f"Exited/stopped containers (Reclaimable: {reclaimable_str})",
+                                risk_tier=RiskTier.TIER2_REVIEW,
+                                description=f"Exited/stopped containers (Reclaimable: {reclaimable_str}). Data written inside them is lost.",
                                 item_type="command",
                                 clean_command=["docker", "container", "prune", "-f"],
                             ))
@@ -123,14 +125,22 @@ def run_docker_prune(all_unused: bool = False) -> Tuple[bool, str]:
         if check.returncode != 0:
             return False, "Docker daemon đang tắt. Hãy mở Docker Desktop lên trước."
 
-        cmd = ["docker", "system", "prune", "-f"]
         if all_unused:
-            cmd.append("--all")
-
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        if res.returncode == 0:
-            return True, res.stdout.strip()
+            # Deep clean: also stopped containers and every unused image (pulled again when needed)
+            commands = [["docker", "system", "prune", "-f", "--all"]]
         else:
-            return False, res.stderr.strip()
+            # Default: only things no build or container will ask for again
+            commands = [
+                ["docker", "image", "prune", "-f"],
+                ["docker", "builder", "prune", "-f", "--filter", f"until={BUILD_CACHE_IDLE_HOURS}h"],
+            ]
+
+        outputs = []
+        for cmd in commands:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            if res.returncode != 0:
+                return False, res.stderr.strip()
+            outputs.append(res.stdout.strip())
+        return True, "\n".join(o for o in outputs if o) or "Không có gì để dọn."
     except Exception as e:
         return False, f"Lỗi chạy docker prune: {e}"

@@ -1,25 +1,23 @@
 """Flutter & Dart project artifacts and pub-cache scanner."""
 
-import os
 import time
 from pathlib import Path
 from typing import List, Optional
 
-from mclean.config import DEFAULT_INACTIVE_DAYS, DEFAULT_PROJECT_ROOTS, is_path_protected
+from mclean.config import DEFAULT_INACTIVE_DAYS, DEFAULT_PROJECT_ROOTS, is_path_ignored, is_path_protected
 from mclean.models import Category, CleanTarget, RiskTier
 from mclean.scanners.base import BaseScanner
 from mclean.utils.disk import get_path_size
 from mclean.utils.formatters import format_timestamp
+from mclean.utils.projects import latest_activity, walk_workspace
 
-IGNORED_DIR_NAMES = {
-    ".git", ".pub-cache", ".dart_tool", "Pods", "node_modules",
-    "build", "DerivedData", ".gradle", "flutter", "cache", "sdk",
-    "Library", ".Trash", "Caches", "Application Support",
-}
+# Heavy build output that Flutter regenerates locally. .dart_tool/package_config.json is
+# kept on purpose so the project does not even need `pub get` when reopened.
+DISPOSABLE_BUILD_PATHS = ["build", ".dart_tool/flutter_build"]
 
 
 class FlutterDartScanner(BaseScanner):
-    """Scans inactive Flutter projects (>14 days) and safe pub-cache components."""
+    """Scans inactive Flutter projects and safe pub-cache components."""
 
     def __init__(self, workspace_roots: Optional[List[Path]] = None, inactive_days: int = DEFAULT_INACTIVE_DAYS):
         self.workspace_roots = workspace_roots or [r for r in DEFAULT_PROJECT_ROOTS if r.exists()]
@@ -37,7 +35,7 @@ class FlutterDartScanner(BaseScanner):
         targets: List[CleanTarget] = []
         home = Path.home()
 
-        # 1. Safe Pub Cache components (TIER 1)
+        # 1. Pub git cache (TIER 2): git dependencies are re-cloned by the next `pub get` that needs them.
         # We NEVER touch ~/.pub-cache/hosted/pub.dev to avoid re-downloading packages!
         git_cache = home / ".pub-cache" / "git" / "cache"
         if git_cache.exists():
@@ -48,80 +46,57 @@ class FlutterDartScanner(BaseScanner):
                     category=self.category,
                     path=git_cache,
                     size_bytes=git_size,
-                    risk_tier=RiskTier.TIER1_SAFE,
-                    description="Cached git clones for pub dependencies. Hosted packages remain intact.",
+                    risk_tier=RiskTier.TIER2_REVIEW,
+                    description="Cached git clones for pub dependencies. Re-cloned on the next pub get that needs them.",
                 ))
 
-        # 2. Inactive Flutter projects build/ and .dart_tool/ folders
+        # 2. Inactive Flutter projects build/ and .dart_tool/flutter_build/ folders
         for root in self.workspace_roots:
             targets.extend(self.scan_workspace_for_inactive_projects(root, self.inactive_days))
 
         return targets
 
     def scan_workspace_for_inactive_projects(self, root: Path, inactive_days: int) -> List[CleanTarget]:
-        """Scan a workspace root for Flutter projects inactive for > inactive_days with fast pruning."""
+        """Scan a workspace root for Flutter projects with no activity for > inactive_days."""
         results: List[CleanTarget] = []
-        if not root.exists() or is_path_protected(root):
+        # Workspace roots like ~/Desktop may never be deleted themselves, but they are scanned
+        if not root.exists() or is_path_ignored(root):
             return results
 
         cutoff_time = time.time() - (inactive_days * 86400)
 
         try:
-            for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
-                # In-place directory pruning so os.walk skips descending into them
-                dirnames[:] = [
-                    d for d in dirnames
-                    if d not in IGNORED_DIR_NAMES and not d.startswith(".")
-                ]
+            for proj_dir, dirnames, filenames in walk_workspace(root):
+                if "pubspec.yaml" not in filenames:
+                    continue
+                # Once a Flutter project root is found, do not recurse into its subfolders
+                dirnames.clear()
 
-                if "pubspec.yaml" in filenames:
-                    proj_dir = Path(dirpath)
-                    # Once a Flutter project root is found, do not recurse into its subfolders
-                    dirnames.clear()
+                if is_path_protected(proj_dir):
+                    continue
 
-                    if is_path_protected(proj_dir):
-                        continue
+                paths = [proj_dir / rel for rel in DISPOSABLE_BUILD_PATHS if (proj_dir / rel).exists()]
+                if not paths:
+                    continue
 
-                    build_dir = proj_dir / "build"
-                    dart_tool_dir = proj_dir / ".dart_tool"
-                    lib_dir = proj_dir / "lib"
+                # Any edit to sources, a build, a pub get or a git operation counts as activity
+                latest_mtime = latest_activity(proj_dir)
+                if not (0 < latest_mtime < cutoff_time):
+                    continue
 
-                    if not (build_dir.exists() or dart_tool_dir.exists()):
-                        continue
-
-                    # Determine latest edit in lib/
-                    latest_mtime = 0.0
-                    if lib_dir.exists():
-                        try:
-                            for entry in os.scandir(lib_dir):
-                                if entry.is_file() and entry.name.endswith(".dart"):
-                                    mtime = entry.stat().st_mtime
-                                    if mtime > latest_mtime:
-                                        latest_mtime = mtime
-                        except OSError:
-                            pass
-
-                    # If project inactive > inactive_days
-                    if 0 < latest_mtime < cutoff_time:
-                        size = 0
-                        if build_dir.exists():
-                            size += get_path_size(build_dir)
-                        if dart_tool_dir.exists():
-                            size += get_path_size(dart_tool_dir)
-
-                        if size > 50 * 1024 * 1024:  # > 50MB
-                            target_path = build_dir if build_dir.exists() else dart_tool_dir
-                            results.append(CleanTarget(
-                                name=f"Inactive Flutter Project: {proj_dir.name}",
-                                category=self.category,
-                                path=target_path,
-                                size_bytes=size,
-                                risk_tier=RiskTier.TIER1_SAFE,
-                                description=f"Inactive since {format_timestamp(latest_mtime)}. Safe to clean; re-created only when opened.",
-                                metadata={"project_path": proj_dir, "last_active": latest_mtime},
-                            ))
+                size = sum(get_path_size(p) for p in paths)
+                if size > 50 * 1024 * 1024:  # > 50MB
+                    results.append(CleanTarget(
+                        name=f"Inactive Flutter Project: {proj_dir.name}",
+                        category=self.category,
+                        path=paths[0],
+                        size_bytes=size,
+                        risk_tier=RiskTier.TIER1_SAFE,
+                        description=f"Inactive since {format_timestamp(latest_mtime)}. Build output only; packages stay resolved, so reopening needs no download.",
+                        item_type="paths",
+                        metadata={"project_path": proj_dir, "last_active": latest_mtime, "paths": paths, "guard": []},
+                    ))
         except Exception:
             pass
 
         return results
-

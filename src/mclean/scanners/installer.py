@@ -44,7 +44,8 @@ def scan_installers(downloads_dir: Path = Path.home() / "Downloads", older_than_
                     # Only show if > 20MB for installers, or > 50MB for archives
                     min_size = 20 * 1024 * 1024 if is_installer else 50 * 1024 * 1024
                     if size >= min_size:
-                        tier = RiskTier.TIER1_SAFE if mtime < cutoff else RiskTier.TIER2_REVIEW
+                        # Archives may be backups or deliverables, so they are never pre-selected
+                        tier = RiskTier.TIER1_SAFE if is_installer and mtime < cutoff else RiskTier.TIER2_REVIEW
                         type_label = "Tệp cài đặt macOS" if ext in {".dmg", ".pkg", ".iso"} else "Mobile Build" if ext in {".apk", ".ipa", ".aab"} else "Tệp nén lớn"
                         targets.append(CleanTarget(
                             name=f"{type_label}: {item.name}",

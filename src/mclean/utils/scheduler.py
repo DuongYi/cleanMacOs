@@ -4,6 +4,9 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Dict, Tuple
+from xml.sax.saxutils import escape
+
+from mclean.utils.disk import TOOL_DIRS
 
 PLIST_NAME = "com.mclean.autoclean.plist"
 LAUNCH_AGENTS_DIR = Path.home() / "Library" / "LaunchAgents"
@@ -28,11 +31,10 @@ def get_mclean_executable_path() -> Path:
 
 
 def generate_plist_content(mclean_path: Path, weekday: int = 1, hour: int = 9, minute: int = 0) -> str:
-    """Generate launchd XML plist content with native macOS notification."""
-    cmd = (
-        f'{mclean_path} clean --force > /dev/null 2>&1 && '
-        'osascript -e \'display notification "Đã tự động giải phóng rác an toàn thành công!" with title "mclean Auto-Clean"\''
-    )
+    """Generate launchd XML plist content. mclean itself sends the notification with the real result."""
+    args = [str(mclean_path), "clean", "--force", "--notify"]
+    args_xml = "\n".join(f"        <string>{escape(a)}</string>" for a in args)
+    path_env = ":".join(TOOL_DIRS + ["/usr/bin", "/bin", "/usr/sbin", "/sbin"])
 
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -42,10 +44,13 @@ def generate_plist_content(mclean_path: Path, weekday: int = 1, hour: int = 9, m
     <string>com.mclean.autoclean</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/bin/bash</string>
-        <string>-c</string>
-        <string>{cmd}</string>
+{args_xml}
     </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>{escape(path_env)}</string>
+    </dict>
     <key>StartCalendarInterval</key>
     <dict>
         <key>Weekday</key>
@@ -56,9 +61,9 @@ def generate_plist_content(mclean_path: Path, weekday: int = 1, hour: int = 9, m
         <integer>{minute}</integer>
     </dict>
     <key>StandardOutPath</key>
-    <string>{LOG_OUT}</string>
+    <string>{escape(str(LOG_OUT))}</string>
     <key>StandardErrorPath</key>
-    <string>{LOG_ERR}</string>
+    <string>{escape(str(LOG_ERR))}</string>
     <key>RunAtLoad</key>
     <false/>
 </dict>
@@ -86,7 +91,7 @@ def install_schedule(weekday: int = 1, hour: int = 9, minute: int = 0) -> Tuple[
         if res.returncode == 0:
             days = ["Chủ nhật", "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy"]
             day_name = days[weekday % 7]
-            return True, f"Đã kích hoạt lịch dọn tự động ngầm: Mỗi {day_name} lúc {hour:02d}:{minute:02d} sáng."
+            return True, f"Đã kích hoạt lịch dọn tự động ngầm: Mỗi {day_name} lúc {hour:02d}:{minute:02d}."
         else:
             return False, f"Lỗi nạp launchctl: {res.stderr.strip()}"
     except Exception as e:

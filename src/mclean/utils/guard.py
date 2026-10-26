@@ -1,19 +1,46 @@
 """Process guard to prevent deleting caches while applications are running."""
 
-from typing import List, Tuple
+import re
+from typing import Dict, List, Set, Tuple
+
 import psutil
 
-# Map of friendly name to process binary substrings
-DEV_PROCESS_PATTERNS = {
-    "Xcode": ["Xcode", "xcodebuild", "ibtool"],
-    "iOS Simulator": ["Simulator", "launchd_sim"],
-    "Android Studio / Emulator": ["studio", "emulator", "qemu-system-aarch64", "qemu-system-x86_64"],
-    "Flutter / Dart": ["flutter_tools", "dart"],
-    "Gradle Daemon": ["GradleDaemon"],
-    "Ollama": ["ollama"],
-    "LM Studio": ["LM Studio"],
-    "Docker": ["Docker", "com.docker.backend"],
+from mclean.models import Category, CleanTarget
+
+# Friendly name -> (process field, regex). Name rules are anchored so that e.g.
+# "LM Studio" is not mistaken for Android Studio.
+DEV_PROCESS_RULES: Dict[str, List[Tuple[str, str]]] = {
+    "Xcode": [("name", r"^(Xcode|xcodebuild|ibtool)$")],
+    "iOS Simulator": [("name", r"^(Simulator|launchd_sim)$")],
+    "Android Studio / Emulator": [("name", r"^(studio|emulator|qemu-system-.+)$")],
+    "Flutter / Dart": [("name", r"^(dart|dartvm|flutter)$"), ("cmdline", r"flutter_tools")],
+    "Gradle Daemon": [("cmdline", r"GradleDaemon|GradleWrapperMain")],
+    "Ollama": [("name", r"^ollama")],
+    "LM Studio": [("name", r"^LM Studio")],
+    "Docker": [("name", r"^(Docker|Docker Desktop|com\.docker\.backend)$")],
+    "VS Code": [("exe", r"/Visual Studio Code\.app/")],
+    "Cursor": [("exe", r"/Cursor\.app/")],
+    "Google Chrome": [("exe", r"/Google Chrome\.app/")],
+    "Cốc Cốc": [("exe", r"/(CocCoc|Cốc Cốc)\.app/")],
+    "Brave": [("exe", r"/Brave Browser\.app/")],
+    "Microsoft Edge": [("exe", r"/Microsoft Edge\.app/")],
+    "Firefox": [("exe", r"/Firefox\.app/")],
 }
+
+# Apps that use the caches of each category while running
+CATEGORY_GUARDS: Dict[Category, Tuple[str, ...]] = {
+    Category.XCODE: ("Xcode", "iOS Simulator"),
+    Category.ANDROID: ("Android Studio / Emulator", "Gradle Daemon"),
+    Category.FLUTTER: ("Flutter / Dart",),
+    Category.AI: ("Ollama", "LM Studio"),
+}
+
+
+def _matches(proc_info: dict, field: str, pattern: str) -> bool:
+    value = proc_info.get(field)
+    if field == "cmdline":
+        value = " ".join(value or [])
+    return bool(value) and re.search(pattern, value) is not None
 
 
 def get_active_dev_processes() -> List[Tuple[str, int]]:
@@ -22,13 +49,12 @@ def get_active_dev_processes() -> List[Tuple[str, int]]:
     seen_names = set()
 
     try:
-        for proc in psutil.process_iter(["pid", "name"]):
+        for proc in psutil.process_iter(["pid", "name", "exe", "cmdline"]):
             try:
-                pname = proc.info["name"] or ""
-                pid = proc.info["pid"]
-                for friendly, patterns in DEV_PROCESS_PATTERNS.items():
-                    if friendly not in seen_names and any(pat.lower() in pname.lower() for pat in patterns):
-                        running.append((friendly, pid))
+                info = proc.info
+                for friendly, rules in DEV_PROCESS_RULES.items():
+                    if friendly not in seen_names and any(_matches(info, f, p) for f, p in rules):
+                        running.append((friendly, info["pid"]))
                         seen_names.add(friendly)
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 continue
@@ -38,20 +64,27 @@ def get_active_dev_processes() -> List[Tuple[str, int]]:
     return running
 
 
-def check_conflicts_for_category(category_name: str) -> List[str]:
-    """Check if any running process conflicts with a cleaning category."""
-    running = get_active_dev_processes()
-    conflicts = []
-    cat_lower = category_name.lower()
+def guard_apps_for_target(target: CleanTarget) -> Tuple[str, ...]:
+    """Apps that must be closed before this target is cleaned (scanner override, else by category)."""
+    if "guard" in target.metadata:
+        return tuple(target.metadata["guard"])
+    return CATEGORY_GUARDS.get(target.category, ())
 
-    for name, pid in running:
-        if "xcode" in cat_lower and name in ("Xcode", "iOS Simulator"):
-            conflicts.append(f"{name} (PID: {pid})")
-        elif "android" in cat_lower and name in ("Android Studio / Emulator", "Gradle Daemon"):
-            conflicts.append(f"{name} (PID: {pid})")
-        elif "flutter" in cat_lower and name in ("Flutter / Dart", "Xcode", "Android Studio / Emulator"):
-            conflicts.append(f"{name} (PID: {pid})")
-        elif "ai" in cat_lower and name in ("Ollama", "LM Studio"):
-            conflicts.append(f"{name} (PID: {pid})")
 
-    return conflicts
+def conflicts_for_target(target: CleanTarget, running: List[Tuple[str, int]]) -> List[str]:
+    """Running apps (with PID) that conflict with cleaning this target."""
+    guards = guard_apps_for_target(target)
+    return [f"{name} (PID: {pid})" for name, pid in running if name in guards]
+
+
+def running_gradle_dists() -> Set[str]:
+    """Wrapper distributions (e.g. 'gradle-9.7.1-bin') that a running Gradle daemon was started from."""
+    dists: Set[str] = set()
+    for proc in psutil.process_iter(["cmdline"]):
+        try:
+            cmd = " ".join(proc.info["cmdline"] or [])
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            continue
+        if "GradleDaemon" in cmd:
+            dists.update(re.findall(r"wrapper/dists/(gradle-[^/\s]+)", cmd))
+    return dists

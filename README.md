@@ -2,7 +2,7 @@
 
 > **Công cụ dọn rác, tối ưu & tự động hoá chuyên dụng cho lập trình viên Flutter, Mobile & AI trên macOS.**  
 > Chắt lọc tinh hoa từ **tw93/Mole** (72.8k ⭐) và **PureMac** (7.4k ⭐).  
-> Giải quyết triệt để vấn đề đầy ổ cứng mà **KHÔNG BAO GIỜ gây ra vòng lặp tải lại dữ liệu**.
+> Giải phóng ổ cứng mà **không ảnh hưởng công việc đang làm** và **không gây vòng lặp xoá rồi tải lại**.
 
 ---
 
@@ -10,8 +10,8 @@
 
 | Tầng | Định nghĩa | Hành vi của mclean |
 | :--- | :--- | :--- |
-| 🟢 **Tier 1: 100% SAFE** | Rác thật (log cũ, file tạm, cache Gradle bản cũ > 30 ngày, build dự án đã lâu không đụng tới). | **Tự động dọn**. Xoá xong **mọi project vẫn chạy ngay lập tức** mà không tải lại 1 byte nào. |
-| 🟡 **Tier 2: REVIEW** | Model AI (HuggingFace, Ollama), máy ảo iOS/Android nặng. | **Chỉ dọn khi bạn chọn** qua menu tương tác (`mclean interactive` hoặc `mclean`). |
+| 🟢 **Tier 1: SAFE** | Chỉ những thứ máy **tự tạo lại tại chỗ** hoặc **không còn ai dùng**: log, file tạm, cache IDE/Simulator, build của dự án không đụng tới > 14 ngày, bản Gradle không dự án nào tham chiếu **và** không chạy > 30 ngày, snapshot AVD không bật > 14 ngày. | **Tự động dọn**. Xoá xong không phải tải lại gì. |
+| 🟡 **Tier 2: REVIEW** | Thứ xoá xong **phải tải lại khi cần**: cache npm/pip/uv/CocoaPods/SwiftPM/pub git, model AI (HuggingFace, Ollama), iOS DeviceSupport, máy ảo lâu không dùng, container Docker đã dừng, tệp nén trong Downloads. | **Chỉ dọn khi bạn chọn** qua menu tương tác (`mclean interactive` hoặc `mclean`). |
 | 🔴 **Tier 3: LOCKED** | Dữ liệu sống (package Dart `pub-cache/hosted`, Android AVD `userdata.img`, Gradle `modules-2`). | **Chặn vĩnh viễn**, không bao giờ xoá nhầm. |
 
 ---
@@ -32,7 +32,7 @@ mclean
 ### 1. 🖥️ Dashboard & Tương Tác
 - `mclean`: Mở Dashboard tương tác tổng hợp (10 tính năng nhanh trong 1 màn hình).
 - `mclean scan`: Quét toàn diện hệ thống với thanh tiến trình đồ hoạ và bảng phân tích màu sắc.
-- `mclean clean`: Dọn dẹp nhanh các mục `SAFE` mà không làm tải lại dữ liệu.
+- `mclean clean [xcode|android|flutter|ai|dev|system|trash]`: Dọn nhanh các mục `SAFE` mà không làm tải lại dữ liệu. Mục mà ứng dụng đang mở dùng tới luôn được bỏ qua, kể cả với `--force`.
 - `mclean interactive` (hoặc `mclean clean -i`): Menu Checkbox duyệt chọn từng Model AI và máy ảo.
 
 ### 2. ⏱️ Tự Động Hoá & Lịch Ngầm (`mclean schedule`)
@@ -59,11 +59,11 @@ mclean history --clear
 ```
 
 ### 4. 🐳 Dọn Dẹp Docker & Containers (`mclean docker`)
-Dọn dẹp triệt để Docker build cache, dangling images và stopped containers:
+Mặc định chỉ dọn dangling images và build cache không dùng hơn 30 ngày, nên các lần build sau vẫn nhanh:
 ```bash
 mclean docker
 
-# Deep clean (xoá toàn bộ container và image không dùng)
+# Deep clean: xoá cả container đã dừng và MỌI image không dùng (phải pull lại khi cần)
 mclean docker --all
 ```
 
@@ -73,9 +73,10 @@ Rà soát nhanh các tệp lớn (video quay màn hình, checkpoint model AI `.s
 # Quét tệp >= 500 MB (mặc định)
 mclean large-files
 
-# Quét tệp >= 100 MB kèm chọn thao tác xem trong Finder hoặc xoá
+# Quét tệp >= 100 MB kèm chọn thao tác xem trong Finder hoặc dọn
 mclean large-files --min-size 100 --interactive
 ```
+Khi dọn tệp của bạn (ở đây và ở `mclean installer`), bạn chọn **chuyển vào Thùng rác** (khôi phục được) hoặc **xoá vĩnh viễn**.
 
 ### 6. 🚀 Tối Ưu Hệ Thống macOS (`mclean optimize`)
 Thực hiện các tinh chỉnh hệ thống chuyên sâu (chuẩn tw93/Mole):
@@ -88,13 +89,13 @@ mclean optimize
 ```
 
 ### 7. 📦 Dọn Tệp Cài Đặt & Mobile Builds (`mclean installer`)
-Quét thư mục `~/Downloads` tìm các file `.dmg`, `.pkg`, `.iso` và các bản build `.apk`, `.ipa`, `.aab` cũ:
+Quét thư mục `~/Downloads` tìm các file `.dmg`, `.pkg`, `.iso`, bản build `.apk`, `.ipa`, `.aab` và tệp nén lớn. Bạn chọn từng tệp; chỉ bộ cài cũ hơn số ngày chỉ định được chọn sẵn, tệp nén không bao giờ được chọn sẵn:
 ```bash
 mclean installer --older-than 7
 ```
 
 ### 8. 🗑️ Dọn Thư Mục Build Dự Án Cũ (`mclean purge`)
-Quét sâu các dự án Flutter, Node, Python và xoá `build/`, `.dart_tool/` của các dự án không đụng tới hơn 14 ngày:
+Quét các dự án không có hoạt động (sửa code, build, `pub get`, git) hơn 14 ngày rồi cho bạn chọn từng mục: `build/` và `.dart_tool/flutter_build/` của Flutter (SAFE, chọn sẵn, giữ `package_config.json` nên mở lại không cần `pub get`), `node_modules` và `Pods` (REVIEW, không chọn sẵn):
 ```bash
 mclean purge ~/Projects --older-than 14
 ```
@@ -115,6 +116,32 @@ mclean ignore remove ~/Projects/my_important_project
 
 ---
 
+## 🔎 Những Gì `mclean` Quét
+
+| Khu vực | SAFE (tự dọn) | REVIEW (bạn chọn) |
+| :--- | :--- | :--- |
+| Xcode & Simulator | DerivedData của dự án không build > 14 ngày, cache Xcode/Simulator/Previews, simulator không còn khả dụng | DeviceSupport theo từng phiên bản OS, simulator không bật > 30 ngày, runtime Simulator không dùng > 30 ngày, cache CocoaPods/SwiftPM |
+| Android | Gradle wrapper/cache không dự án nào khai báo **và** không chạy > 30 ngày, log daemon > 7 ngày, snapshot AVD không bật > 14 ngày, system image x86 trên Apple Silicon | System image không AVD nào dùng, NDK không dự án/Flutter SDK/plugin nào khai báo (luôn giữ bản mới nhất) |
+| Flutter | `build/` và `.dart_tool/flutter_build/` của dự án không hoạt động > 14 ngày | Cache git của pub |
+| AI & Python | Cache IDE (VS Code, Cursor), kernel PyTorch, log Ollama/LM Studio, `uv cache prune` | Model HuggingFace/Ollama, cache pip, toàn bộ cache uv |
+| Dự án lâu không đụng tới (> 14 ngày) | — | `node_modules`, `Pods` (khôi phục bằng `npm install` / `pod install`) |
+| Trình duyệt | — | Cache Chrome, Cốc Cốc, Brave, Edge, Firefox (giữ nguyên đăng nhập, lịch sử; bỏ qua khi trình duyệt đang mở) |
+| Hệ thống | Log ứng dụng, crash report, Thùng rác, `brew cleanup`, `pnpm store prune` | Cache npm/Yarn/Bun |
+
+---
+
+## 🧪 Phát Triển & Kiểm Thử
+
+```bash
+.venv/bin/pip install -e ".[dev]"
+.venv/bin/python -m pytest
+```
+Test chạy hoàn toàn trong thư mục tạm và không đụng tới cấu hình hay lịch sử thật trong `~/.config/mclean`.
+
+---
+
 ## 🛡️ Tích Hợp Sẵn Process Guard
 
-Trước khi dọn dẹp, `mclean` tự động phát hiện xem Xcode, Android Studio, Flutter, iOS Simulator, hay Ollama có đang mở không. Nếu đang chạy, công cụ sẽ cảnh báo để bảo vệ tiến trình của bạn không bị gián đoạn.
+Trước khi dọn, `mclean` kiểm tra Xcode, iOS Simulator, Android Studio/Emulator, Gradle Daemon, Flutter/Dart, VS Code, Cursor, Ollama và LM Studio. Mục nào ứng dụng đang mở dùng tới sẽ **được bỏ qua**, không bị xoá, ở mọi chế độ (kể cả `--force` và lịch tự động). Bản Gradle mà một daemon đang chạy cũng không bao giờ bị đề xuất.
+
+> 💡 Extension Java/Gradle của VS Code-based IDE (`redhat.java`, `vscjava.vscode-gradle`) tự import cả các project Android mẫu trong `~/.pub-cache` và tải Gradle wrapper riêng cho từng project. Nếu không làm Android native, tắt `java.import.gradle.enabled` và `gradle.autoDetect` trong workspace Flutter để tránh tải về hàng GB không cần thiết.

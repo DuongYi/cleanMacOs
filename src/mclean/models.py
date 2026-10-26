@@ -22,6 +22,7 @@ class Category(str, Enum):
     DEV = "Developer Tools"
     SYSTEM = "macOS System Junk"
     TRASH = "Trash & Volumes"
+    BROWSER = "Browser Caches"
 
 
 @dataclass
@@ -33,7 +34,7 @@ class CleanTarget:
     size_bytes: int
     risk_tier: RiskTier = RiskTier.TIER1_SAFE
     description: str = ""
-    item_type: str = "directory"  # "directory", "file", or "command"
+    item_type: str = "directory"  # "directory", "file", "command", "paths" (metadata["paths"]) or "contents" (children of path)
     clean_command: Optional[list[str]] = None
     metadata: dict[str, Any] = field(default_factory=dict)
 

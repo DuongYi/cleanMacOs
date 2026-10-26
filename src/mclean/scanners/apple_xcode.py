@@ -49,13 +49,13 @@ class AppleXcodeScanner(BaseScanner):
 
         # 1. Caches Xcode and the Simulator regenerate locally (TIER 1, skipped while Xcode runs)
         standard_paths = [
-            ("CoreSimulator Caches", home / "Library/Developer/CoreSimulator/Caches", "iOS Simulator system caches, rebuilt locally on next boot", RiskTier.TIER1_SAFE),
-            ("SwiftUI Previews Cache", home / "Library/Developer/Xcode/UserData/Previews", "Cached SwiftUI canvas preview snapshots, rebuilt locally", RiskTier.TIER1_SAFE),
-            ("Xcode App Cache", home / "Library/Caches/com.apple.dt.Xcode", "Xcode IDE temporary caches", RiskTier.TIER1_SAFE),
-            ("CoreSimulator Logs", home / "Library/Logs/CoreSimulator", "Simulator crash logs and diagnostics", RiskTier.TIER1_SAFE),
+            ("Cache CoreSimulator", home / "Library/Developer/CoreSimulator/Caches", "Cache hệ thống của iOS Simulator, tự tạo lại khi bật", RiskTier.TIER1_SAFE),
+            ("Cache SwiftUI Previews", home / "Library/Developer/Xcode/UserData/Previews", "Ảnh preview SwiftUI, tự tạo lại tại máy", RiskTier.TIER1_SAFE),
+            ("Cache Xcode", home / "Library/Caches/com.apple.dt.Xcode", "Cache tạm của Xcode", RiskTier.TIER1_SAFE),
+            ("Log CoreSimulator", home / "Library/Logs/CoreSimulator", "Log crash và chẩn đoán của Simulator", RiskTier.TIER1_SAFE),
             # Download caches: deleting them means fetching again on the next `pod install` / package resolve
-            ("CocoaPods Cache", home / "Library/Caches/CocoaPods", "Downloaded pod archives. Re-downloaded on the next pod install that needs them.", RiskTier.TIER2_REVIEW),
-            ("Swift Package Manager Cache", home / "Library/Caches/org.swift.swiftpm", "SwiftPM clone cache. Re-cloned on the next package resolve that needs it.", RiskTier.TIER2_REVIEW),
+            ("Cache CocoaPods", home / "Library/Caches/CocoaPods", "Pod đã tải. Lần pod install sau phải tải lại nếu cần.", RiskTier.TIER2_REVIEW),
+            ("Cache Swift Package Manager", home / "Library/Caches/org.swift.swiftpm", "Repo SwiftPM đã clone. Lần resolve sau phải clone lại nếu cần.", RiskTier.TIER2_REVIEW),
         ]
 
         sizes = get_batch_sizes([p for _, p, _, _ in standard_paths])
@@ -80,12 +80,12 @@ class AppleXcodeScanner(BaseScanner):
 
         # 2. Simulator unavailable cleanup command
         targets.append(CleanTarget(
-            name="iOS Simulators: Delete Unavailable",
+            name="iOS Simulator: xoá máy không còn khả dụng",
             category=self.category,
             path=home / "Library/Developer/CoreSimulator/Caches",
             size_bytes=0,  # Command-based, dynamically recovers space
             risk_tier=RiskTier.TIER1_SAFE,
-            description="Calls 'xcrun simctl delete unavailable' to safely remove obsolete runtimes",
+            description="Chạy 'xcrun simctl delete unavailable': xoá simulator của runtime đã gỡ",
             item_type="command",
             clean_command=["xcrun", "simctl", "delete", "unavailable"],
             metadata={"guard": []},  # unavailable simulators cannot be running
@@ -121,7 +121,7 @@ class AppleXcodeScanner(BaseScanner):
                     path=item,
                     size_bytes=size,
                     risk_tier=RiskTier.TIER1_SAFE,
-                    description=f"Build intermediates of a project last built {format_timestamp(last_used)}. Rebuilt locally if reopened.",
+                    description=f"File build trung gian của dự án build lần cuối {format_timestamp(last_used)}. Tự build lại tại máy nếu mở lại.",
                 ))
         return results
 
@@ -142,7 +142,7 @@ class AppleXcodeScanner(BaseScanner):
                     path=item,
                     size_bytes=size,
                     risk_tier=RiskTier.TIER2_REVIEW,
-                    description=f"Device debug symbols, last used {format_timestamp(last_used)}. Xcode copies them again (several minutes) if a device on this OS reconnects.",
+                    description=f"Symbol debug của thiết bị, dùng lần cuối {format_timestamp(last_used)}. Xcode chép lại (vài phút) nếu cắm lại máy chạy OS này.",
                     metadata={"last_used": last_used},
                 ))
         return results
@@ -164,12 +164,12 @@ class AppleXcodeScanner(BaseScanner):
                 continue
             platform = rt.get("runtimeIdentifier", "").rsplit(".", 1)[-1].split("-")[0] or "Simulator"
             results.append(CleanTarget(
-                name=f"Simulator Runtime: {platform} {rt.get('version', '?')} ({rt.get('build', '')})",
+                name=f"Runtime Simulator: {platform} {rt.get('version', '?')} ({rt.get('build', '')})",
                 category=self.category,
                 path=Path(rt.get("path") or "/Library/Developer/CoreSimulator"),
                 size_bytes=int(rt.get("sizeBytes", 0)),
                 risk_tier=RiskTier.TIER2_REVIEW,
-                description=f"Not used for {idle}+ days. Simulators on this OS version stop working; Xcode downloads it again (several GB) if needed.",
+                description=f"Không dùng {idle}+ ngày. Simulator chạy OS này sẽ ngừng hoạt động; Xcode tải lại (vài GB) nếu cần.",
                 item_type="command",
                 clean_command=["xcrun", "simctl", "runtime", "delete", rid],
             ))
@@ -221,12 +221,12 @@ class AppleXcodeScanner(BaseScanner):
                         size = get_path_size(data_path)
                         if size > 50 * 1024 * 1024:
                             results.append(CleanTarget(
-                                name=f"Unavailable Simulator: {name}",
+                                name=f"Simulator không khả dụng: {name}",
                                 category=self.category,
                                 path=data_path,
                                 size_bytes=size,
                                 risk_tier=RiskTier.TIER1_SAFE,
-                                description=f"Obsolete simulator runtime ({runtime_name}), UDID: {udid}",
+                                description=f"Simulator của runtime đã gỡ ({runtime_name}), UDID: {udid}",
                                 item_type="command",
                                 clean_command=["xcrun", "simctl", "delete", udid],
                                 metadata={"guard": []},
@@ -237,12 +237,12 @@ class AppleXcodeScanner(BaseScanner):
                             size = get_path_size(data_path)
                             if size > 1500 * 1024 * 1024:  # > 1.5 GB
                                 results.append(CleanTarget(
-                                    name=f"Heavy Simulator: {name} ({state})",
+                                    name=f"Simulator nặng: {name}",
                                     category=self.category,
                                     path=data_path,
                                     size_bytes=size,
                                     risk_tier=RiskTier.TIER2_REVIEW,
-                                    description=f"Not booted for {self._idle_days(dev.get('lastBootedAt'))}+ days. Erase resets installed apps. Runtime: {runtime_name.split('.')[-1]}",
+                                    description=f"Không bật {self._idle_days(dev.get('lastBootedAt'))}+ ngày. Erase sẽ xoá app đã cài. Runtime: {runtime_name.split('.')[-1]}",
                                     item_type="command",
                                     clean_command=["xcrun", "simctl", "erase", udid],
                                     metadata={"udid": udid, "action": "erase"},

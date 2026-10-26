@@ -73,12 +73,12 @@ class AndroidJavaScanner(BaseScanner):
         logs_size = sum(f.stat().st_size for f in old_logs)
         if logs_size > 10 * 1024 * 1024:
             targets.append(CleanTarget(
-                name="Gradle Daemon Logs",
+                name="Log Gradle daemon",
                 category=self.category,
                 path=home / ".gradle" / "daemon",
                 size_bytes=logs_size,
                 risk_tier=RiskTier.TIER1_SAFE,
-                description=f"Daemon log files older than {DAEMON_LOG_DAYS} days",
+                description=f"File log daemon cũ hơn {DAEMON_LOG_DAYS} ngày",
                 item_type="paths",
                 metadata={"paths": old_logs, "guard": []},
             ))
@@ -127,15 +127,15 @@ class AndroidJavaScanner(BaseScanner):
                 # The emulator on Apple Silicon cannot boot x86 images at all
                 unbootable = platform.machine() == "arm64" and abi.startswith("x86")
                 results.append(CleanTarget(
-                    name=f"Unused System Image: {api} {tag} ({abi})",
+                    name=f"System image không dùng: {api} {tag} ({abi})",
                     category=self.category,
                     path=abi_dir,
                     size_bytes=size,
                     risk_tier=RiskTier.TIER1_SAFE if unbootable else RiskTier.TIER2_REVIEW,
                     description=(
-                        "x86 image that the emulator cannot run on this Apple Silicon Mac."
+                        "Image x86, emulator không chạy được trên máy Mac Apple Silicon này."
                         if unbootable
-                        else "No AVD uses this emulator image. Android Studio downloads it again only if you create an AVD with it."
+                        else "Không AVD nào dùng image này. Android Studio chỉ tải lại nếu bạn tạo AVD với nó."
                     ),
                     metadata={"guard": ["Android Studio / Emulator"]},  # Gradle never reads system images
                 ))
@@ -161,12 +161,12 @@ class AndroidJavaScanner(BaseScanner):
             size = get_path_size(d)
             if size > 100 * 1024 * 1024:
                 results.append(CleanTarget(
-                    name=f"Unused NDK: {d.name}",
+                    name=f"NDK không dùng: {d.name}",
                     category=self.category,
                     path=d,
                     size_bytes=size,
                     risk_tier=RiskTier.TIER2_REVIEW,
-                    description="Not named by any project, Flutter SDK or plugin in your pub cache. Gradle downloads it again if a build asks for it.",
+                    description="Không dự án, Flutter SDK hay plugin nào trong pub cache khai báo. Gradle tải lại nếu có bản build cần đến.",
                 ))
         return results
 
@@ -200,12 +200,12 @@ class AndroidJavaScanner(BaseScanner):
             size = sizes.get(item, 0)
             if size > 10 * 1024 * 1024:
                 results.append(CleanTarget(
-                    name=f"Unused Gradle Wrapper: {item.name}",
+                    name=f"Gradle wrapper không dùng: {item.name}",
                     category=self.category,
                     path=item,
                     size_bytes=size,
                     risk_tier=RiskTier.TIER1_SAFE,
-                    description=f"Gradle {v}: no project references it and nothing has run it for {_gradle_idle_days(str(v), item)} days.",
+                    description=f"Gradle {v}: không dự án nào khai báo và không chạy {_gradle_idle_days(str(v), item)} ngày.",
                     metadata={"guard": []},  # versions used by running daemons are excluded above
                 ))
 
@@ -237,12 +237,12 @@ class AndroidJavaScanner(BaseScanner):
             size = sizes.get(item, 0)
             if size > 50 * 1024 * 1024:
                 results.append(CleanTarget(
-                    name=f"Unused Gradle Cache: {item.name}",
+                    name=f"Cache Gradle không dùng: {item.name}",
                     category=self.category,
                     path=item,
                     size_bytes=size,
                     risk_tier=RiskTier.TIER1_SAFE,
-                    description=f"Execution cache for Gradle {v}, unused for {_gradle_idle_days(item.name)} days. Dependencies in modules-2 are kept.",
+                    description=f"Cache chạy của Gradle {v}, không dùng {_gradle_idle_days(item.name)} ngày. Thư viện trong modules-2 được giữ.",
                     metadata={"guard": []},  # versions used by running daemons are excluded above
                 ))
 
@@ -287,12 +287,12 @@ class AndroidJavaScanner(BaseScanner):
                 snap_size = get_path_size(snapshots_dir)
                 if snap_size > 50 * 1024 * 1024:
                     results.append(CleanTarget(
-                        name=f"AVD Snapshots: {avd_name}",
+                        name=f"Snapshot AVD: {avd_name}",
                         category=self.category,
                         path=snapshots_dir,
                         size_bytes=snap_size,
                         risk_tier=RiskTier.TIER1_SAFE,
-                        description=f"Quick-boot snapshots of an emulator idle since {format_timestamp(last_boot)}. Apps and data are kept.",
+                        description=f"Snapshot khởi động nhanh của emulator không bật từ {format_timestamp(last_boot)}. App và dữ liệu được giữ.",
                     ))
 
             # 2. Temporary cache img files
@@ -301,12 +301,12 @@ class AndroidJavaScanner(BaseScanner):
                     c_size = cache_file.stat().st_size
                     if c_size > 10 * 1024 * 1024:
                         results.append(CleanTarget(
-                            name=f"AVD Temp Cache: {avd_name}/{cache_file.name}",
+                            name=f"Cache tạm AVD: {avd_name}/{cache_file.name}",
                             category=self.category,
                             path=cache_file,
                             size_bytes=c_size,
                             risk_tier=RiskTier.TIER1_SAFE,
-                            description="Temporary Android emulator partition cache, recreated on boot.",
+                            description="Phân vùng cache tạm của emulator, tự tạo lại khi khởi động.",
                             item_type="file",
                         ))
 

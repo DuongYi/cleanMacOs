@@ -38,12 +38,12 @@ class BrowserScanner(BaseScanner):
             size = sizes.get(path, 0)
             if size > 100 * 1024 * 1024:
                 targets.append(CleanTarget(
-                    name=f"{browser} Cache",
+                    name=f"Cache {browser}",
                     category=self.category,
                     path=path,
                     size_bytes=size,
                     risk_tier=RiskTier.TIER2_REVIEW,
-                    description="Cached pages, images and scripts for all profiles. Logins and history are kept; sites load a little slower until the cache refills.",
+                    description="Trang, ảnh và script đã cache của mọi profile. Đăng nhập và lịch sử được giữ; web tải chậm hơn một chút cho tới khi cache đầy lại.",
                     metadata={"guard": [guard]},
                 ))
         return targets

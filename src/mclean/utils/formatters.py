@@ -24,15 +24,15 @@ def format_size(size_bytes: int) -> str:
 def format_timestamp(timestamp: float) -> str:
     """Format Unix timestamp into human-readable relative time and date."""
     if timestamp <= 0:
-        return "Unknown"
+        return "không rõ"
     dt = datetime.fromtimestamp(timestamp)
     diff = time.time() - timestamp
     days = int(diff / 86400)
     if days == 0:
-        return f"Today ({dt.strftime('%H:%M')})"
+        return f"hôm nay ({dt.strftime('%H:%M')})"
     if days == 1:
-        return f"Yesterday ({dt.strftime('%H:%M')})"
+        return f"hôm qua ({dt.strftime('%H:%M')})"
     if days < 30:
-        return f"{days} days ago"
+        return f"{days} ngày trước"
     months = days // 30
-    return f"{months} mo ago ({dt.strftime('%Y-%m-%d')})"
+    return f"{months} tháng trước ({dt.strftime('%d/%m/%Y')})"

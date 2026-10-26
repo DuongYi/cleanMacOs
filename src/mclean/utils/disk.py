@@ -72,27 +72,27 @@ def get_batch_sizes(paths: Iterable[Path], max_workers: int = 8) -> Dict[Path, i
 def safe_delete_path(path: Path, dry_run: bool = False) -> Tuple[bool, str]:
     """Safely remove a file or directory with blacklist guards."""
     if is_path_protected(path):
-        return False, f"Path is protected by safety blacklist: {path}"
+        return False, f"Đường dẫn được bảo vệ, không xoá: {path}"
 
     if not path.exists():
-        return True, "Path does not exist (already clean)"
+        return True, "Không còn tồn tại (đã sạch)"
 
     if dry_run:
-        return True, f"[Dry-run] Would delete: {path}"
+        return True, f"[Dry-run] Sẽ xoá: {path}"
 
     try:
         if path.is_file() or path.is_symlink():
             path.unlink(missing_ok=True)
-            return True, f"Deleted file: {path.name}"
+            return True, f"Đã xoá tệp: {path.name}"
         elif path.is_dir():
             shutil.rmtree(path)
-            return True, f"Deleted directory: {path.name}"
+            return True, f"Đã xoá thư mục: {path.name}"
     except PermissionError:
-        return False, f"Permission denied deleting {path}. You may need elevated rights."
+        return False, f"Không có quyền xoá {path}."
     except Exception as e:
-        return False, f"Error deleting {path}: {e}"
+        return False, f"Lỗi khi xoá {path}: {e}"
 
-    return True, "Deleted successfully"
+    return True, "Đã xoá"
 
 
 # launchd jobs run with a minimal PATH, so look in the usual install locations too
@@ -114,18 +114,18 @@ def find_tool(name: str) -> Optional[str]:
 def move_to_trash(path: Path) -> Tuple[bool, str]:
     """Move a file or folder to ~/.Trash so it can still be recovered."""
     if is_path_protected(path):
-        return False, f"Path is protected by safety blacklist: {path}"
+        return False, f"Đường dẫn được bảo vệ, không xoá: {path}"
     if not path.exists():
-        return False, f"Path does not exist: {path}"
+        return False, f"Không tồn tại: {path}"
     trash = Path.home() / ".Trash"
     dest = trash / path.name
     if dest.exists():
         dest = trash / f"{path.stem} {time.strftime('%H.%M.%S')}{path.suffix}"
     try:
         shutil.move(str(path), str(dest))
-        return True, f"Moved to Trash: {path.name}"
+        return True, f"Đã chuyển vào Thùng rác: {path.name}"
     except OSError as e:
-        return False, f"Error moving {path} to Trash: {e}"
+        return False, f"Lỗi khi chuyển {path} vào Thùng rác: {e}"
 
 
 def get_disk_space() -> Tuple[int, int, int]:

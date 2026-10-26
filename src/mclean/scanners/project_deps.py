@@ -82,11 +82,11 @@ class ProjectDepsScanner(BaseScanner):
         if size < setting("min_project_size_mb") * 1024 * 1024:
             return None
         return CleanTarget(
-            name=f"{kind} of inactive project: {project.name}",
+            name=f"{kind} của dự án cũ: {project.name}",
             category=self.category,
             path=deps_dir,
             size_bytes=size,
             risk_tier=RiskTier.TIER2_REVIEW,
-            description=f"Inactive since {format_timestamp(active)}. Restore with '{reinstall}', which downloads anything missing from the package cache.",
+            description=f"Không hoạt động từ {format_timestamp(active)}. Khôi phục bằng '{reinstall}' (tải lại phần không có trong cache).",
             metadata={"project_path": project, "last_active": active, "guard": []},
         )

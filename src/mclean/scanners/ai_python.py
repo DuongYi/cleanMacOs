@@ -28,16 +28,16 @@ class AiPythonScanner(BaseScanner):
         # 1. Caches rebuilt locally and logs (TIER 1), plus download caches (TIER 2)
         # (name, path, description, tier, apps that must be closed)
         caches = [
-            ("PyTorch Kernels Cache", home / ".cache" / "torch" / "kernels", "Compiled JIT PyTorch CUDA/Metal shader kernels, recompiled locally.", RiskTier.TIER1_SAFE, []),
-            ("Cursor IDE Cache", home / "Library" / "Application Support" / "Cursor" / "Cache", "Editor web cache, rebuilt locally.", RiskTier.TIER1_SAFE, ["Cursor"]),
-            ("Cursor CachedData", home / "Library" / "Application Support" / "Cursor" / "CachedData", "V8 compiled bytecode cache, rebuilt locally.", RiskTier.TIER1_SAFE, ["Cursor"]),
-            ("VS Code Cache", home / "Library" / "Application Support" / "Code" / "Cache", "VS Code web cache, rebuilt locally.", RiskTier.TIER1_SAFE, ["VS Code"]),
-            ("VS Code CachedData", home / "Library" / "Application Support" / "Code" / "CachedData", "V8 compiled bytecode cache, rebuilt locally.", RiskTier.TIER1_SAFE, ["VS Code"]),
-            ("Ollama Logs", home / ".ollama" / "logs", "Ollama daemon execution and runtime logs.", RiskTier.TIER1_SAFE, ["Ollama"]),
-            ("LM Studio Server Logs", home / ".lmstudio" / "server-logs", "LM Studio local API server logs.", RiskTier.TIER1_SAFE, ["LM Studio"]),
-            ("Pip Wheel Cache", home / ".cache" / "pip", "Downloaded wheels. Virtualenvs are unaffected, but the next install of these packages downloads them again.", RiskTier.TIER2_REVIEW, []),
-            ("Pip Library Cache", home / "Library" / "Caches" / "pip", "Downloaded wheels. The next install of these packages downloads them again.", RiskTier.TIER2_REVIEW, []),
-            ("uv Package Cache (full)", home / ".cache" / "uv", "All uv downloads. The next uv sync downloads them again; prefer the 'uv cache prune' item.", RiskTier.TIER2_REVIEW, []),
+            ("Cache kernel PyTorch", home / ".cache" / "torch" / "kernels", "Kernel CUDA/Metal do PyTorch biên dịch, tự biên dịch lại tại máy.", RiskTier.TIER1_SAFE, []),
+            ("Cache Cursor", home / "Library" / "Application Support" / "Cursor" / "Cache", "Cache web của trình soạn thảo, tự tạo lại tại máy.", RiskTier.TIER1_SAFE, ["Cursor"]),
+            ("Cursor CachedData", home / "Library" / "Application Support" / "Cursor" / "CachedData", "Bytecode V8 đã biên dịch, tự tạo lại tại máy.", RiskTier.TIER1_SAFE, ["Cursor"]),
+            ("Cache VS Code", home / "Library" / "Application Support" / "Code" / "Cache", "Cache web của VS Code, tự tạo lại tại máy.", RiskTier.TIER1_SAFE, ["VS Code"]),
+            ("VS Code CachedData", home / "Library" / "Application Support" / "Code" / "CachedData", "Bytecode V8 đã biên dịch, tự tạo lại tại máy.", RiskTier.TIER1_SAFE, ["VS Code"]),
+            ("Log Ollama", home / ".ollama" / "logs", "Log chạy của Ollama.", RiskTier.TIER1_SAFE, ["Ollama"]),
+            ("Log server LM Studio", home / ".lmstudio" / "server-logs", "Log của server API cục bộ LM Studio.", RiskTier.TIER1_SAFE, ["LM Studio"]),
+            ("Cache pip", home / ".cache" / "pip", "Wheel đã tải. Virtualenv không bị ảnh hưởng, nhưng lần cài sau phải tải lại các gói này.", RiskTier.TIER2_REVIEW, []),
+            ("Cache pip (Library)", home / "Library" / "Caches" / "pip", "Wheel đã tải. Lần cài sau phải tải lại các gói này.", RiskTier.TIER2_REVIEW, []),
+            ("Cache uv (toàn bộ)", home / ".cache" / "uv", "Mọi thứ uv đã tải. Lần uv sync sau phải tải lại; nên dùng mục 'uv cache prune'.", RiskTier.TIER2_REVIEW, []),
         ]
 
         sizes = get_batch_sizes([c[1] for c in caches])
@@ -58,12 +58,12 @@ class AiPythonScanner(BaseScanner):
         uv = find_tool("uv")
         if uv and (home / ".cache" / "uv").exists():
             targets.append(CleanTarget(
-                name="uv Cache: Prune Unused",
+                name="uv: dọn cache không dùng",
                 category=self.category,
                 path=home / ".cache" / "uv",
                 size_bytes=0,
                 risk_tier=RiskTier.TIER1_SAFE,
-                description="Runs 'uv cache prune': removes only cache entries no project uses.",
+                description="Chạy 'uv cache prune': chỉ xoá phần cache không dự án nào dùng.",
                 item_type="command",
                 clean_command=[uv, "cache", "prune"],
                 metadata={"guard": []},
@@ -103,12 +103,12 @@ class AiPythonScanner(BaseScanner):
 
                 if size > 10 * 1024 * 1024:
                     results.append(CleanTarget(
-                        name=f"HF Model: {model_name}",
+                        name=f"Model Hugging Face: {model_name}",
                         category=self.category,
                         path=item,
                         size_bytes=size,
                         risk_tier=RiskTier.TIER2_REVIEW,
-                        description=f"Hugging Face weights, downloaded again on next use. Last accessed {format_timestamp(atime)}.",
+                        description=f"Trọng số Hugging Face, phải tải lại khi dùng lần sau. Truy cập lần cuối {format_timestamp(atime)}.",
                         metadata={"model_name": model_name, "last_accessed": atime},
                     ))
 
@@ -140,12 +140,12 @@ class AiPythonScanner(BaseScanner):
                     pass
 
                 results.append(CleanTarget(
-                    name=f"Ollama Model: {model_tag}",
+                    name=f"Model Ollama: {model_tag}",
                     category=self.category,
                     path=manifest_file,
                     size_bytes=size,
                     risk_tier=RiskTier.TIER2_REVIEW,
-                    description=f"Ollama local model. Must be downloaded again to use it. Removed with 'ollama rm {model_tag}'.",
+                    description=f"Model Ollama cục bộ, phải tải lại nếu muốn dùng. Xoá bằng 'ollama rm {model_tag}'.",
                     item_type="command",
                     clean_command=[find_tool("ollama") or "ollama", "rm", model_tag],
                     metadata={"model_tag": model_tag},

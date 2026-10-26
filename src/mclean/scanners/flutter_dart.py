@@ -42,12 +42,12 @@ class FlutterDartScanner(BaseScanner):
             git_size = get_path_size(git_cache)
             if git_size > 10 * 1024 * 1024:
                 targets.append(CleanTarget(
-                    name="Dart Pub Git Cache",
+                    name="Cache git của pub",
                     category=self.category,
                     path=git_cache,
                     size_bytes=git_size,
                     risk_tier=RiskTier.TIER2_REVIEW,
-                    description="Cached git clones for pub dependencies. Re-cloned on the next pub get that needs them.",
+                    description="Repo git của dependency pub. Lần pub get sau phải clone lại nếu cần.",
                 ))
 
         # 2. Inactive Flutter projects build/ and .dart_tool/flutter_build/ folders
@@ -87,12 +87,12 @@ class FlutterDartScanner(BaseScanner):
                 size = sum(get_path_size(p) for p in paths)
                 if size > setting("min_project_size_mb") * 1024 * 1024:
                     results.append(CleanTarget(
-                        name=f"Inactive Flutter Project: {proj_dir.name}",
+                        name=f"Build Flutter của dự án cũ: {proj_dir.name}",
                         category=self.category,
                         path=paths[0],
                         size_bytes=size,
                         risk_tier=RiskTier.TIER1_SAFE,
-                        description=f"Inactive since {format_timestamp(latest_mtime)}. Build output only; packages stay resolved, so reopening needs no download.",
+                        description=f"Không hoạt động từ {format_timestamp(latest_mtime)}. Chỉ xoá output build; package vẫn giữ nên mở lại không cần tải gì.",
                         item_type="paths",
                         metadata={"project_path": proj_dir, "last_active": latest_mtime, "paths": paths, "guard": []},
                     ))

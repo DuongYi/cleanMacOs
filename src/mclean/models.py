@@ -19,10 +19,10 @@ class Category(str, Enum):
     ANDROID = "Android & Gradle"
     FLUTTER = "Flutter & Dart"
     AI = "AI & Machine Learning"
-    DEV = "Developer Tools"
-    SYSTEM = "macOS System Junk"
-    TRASH = "Trash & Volumes"
-    BROWSER = "Browser Caches"
+    DEV = "Công cụ lập trình"
+    SYSTEM = "Rác hệ thống macOS"
+    TRASH = "Thùng rác"
+    BROWSER = "Cache trình duyệt"
 
 
 @dataclass

@@ -29,15 +29,15 @@ class SystemJunkScanner(BaseScanner):
         # 1. Package manager download caches (TIER 2): existing installs keep working,
         # but the next install that needs these packages downloads them again.
         pkg_caches = [
-            ("npm Cache", home / ".npm" / "_cacache", "npm download cache. Re-downloaded on the next install that needs it."),
-            ("Yarn Cache", home / "Library" / "Caches" / "Yarn", "Yarn download cache. Re-downloaded on the next install that needs it."),
-            ("Bun Install Cache", home / ".bun" / "install" / "cache", "Bun download cache. Re-downloaded on the next install that needs it."),
+            ("Cache npm", home / ".npm" / "_cacache", "Gói npm đã tải. Lần cài sau phải tải lại nếu cần."),
+            ("Cache Yarn", home / "Library" / "Caches" / "Yarn", "Gói Yarn đã tải. Lần cài sau phải tải lại nếu cần."),
+            ("Cache Bun", home / ".bun" / "install" / "cache", "Gói Bun đã tải. Lần cài sau phải tải lại nếu cần."),
         ]
         # 2. Logs (TIER 1)
         log_paths = [
-            ("npm Logs", home / ".npm" / "_logs", "Debug log files from past npm runs", Category.DEV),
-            ("OrbStack Logs", home / "Library" / "Logs" / "OrbStack", "OrbStack virtualization logs", Category.DEV),
-            ("macOS Crash Reports", home / "Library" / "Logs" / "DiagnosticReports", "Old app crash dumps and diagnostic traces", Category.SYSTEM),
+            ("Log npm", home / ".npm" / "_logs", "Log debug của các lần chạy npm", Category.DEV),
+            ("Log OrbStack", home / "Library" / "Logs" / "OrbStack", "Log máy ảo OrbStack", Category.DEV),
+            ("Báo cáo crash macOS", home / "Library" / "Logs" / "DiagnosticReports", "Báo cáo crash và chẩn đoán cũ của ứng dụng", Category.SYSTEM),
         ]
 
         sizes = get_batch_sizes([p for _, p, _ in pkg_caches] + [p for _, p, _, _ in log_paths])
@@ -65,12 +65,12 @@ class SystemJunkScanner(BaseScanner):
             other_size = sum(get_batch_sizes(other_logs).values())
             if other_size > 10 * 1024 * 1024:
                 targets.append(CleanTarget(
-                    name="macOS App Logs",
+                    name="Log ứng dụng macOS",
                     category=Category.SYSTEM,
                     path=logs_root,
                     size_bytes=other_size,
                     risk_tier=RiskTier.TIER1_SAFE,
-                    description="Application execution logs in ~/Library/Logs",
+                    description="Log chạy của ứng dụng trong ~/Library/Logs",
                     item_type="contents",
                     metadata={"exclude": sorted(LOGS_LISTED_ELSEWHERE)},
                 ))
@@ -79,12 +79,12 @@ class SystemJunkScanner(BaseScanner):
         brew = find_tool("brew")
         if brew:
             targets.append(CleanTarget(
-                name="Homebrew: Cleanup Outdated",
+                name="Homebrew: dọn bản cũ",
                 category=Category.DEV,
                 path=home / "Library" / "Caches" / "Homebrew",
                 size_bytes=0,
                 risk_tier=RiskTier.TIER1_SAFE,
-                description="Runs 'brew cleanup': removes old versions and stale downloads only.",
+                description="Chạy 'brew cleanup': chỉ xoá bản cũ và file tải đã lỗi thời.",
                 item_type="command",
                 clean_command=[brew, "cleanup"],
             ))
@@ -93,12 +93,12 @@ class SystemJunkScanner(BaseScanner):
         pnpm = find_tool("pnpm")
         if pnpm:
             targets.append(CleanTarget(
-                name="pnpm Store: Prune Unreferenced",
+                name="pnpm: dọn gói không dùng",
                 category=Category.DEV,
                 path=home / "Library" / "pnpm" / "store",
                 size_bytes=0,
                 risk_tier=RiskTier.TIER1_SAFE,
-                description="Runs 'pnpm store prune': removes only packages no project references.",
+                description="Chạy 'pnpm store prune': chỉ xoá gói không dự án nào dùng.",
                 item_type="command",
                 clean_command=[pnpm, "store", "prune"],
             ))
@@ -109,12 +109,12 @@ class SystemJunkScanner(BaseScanner):
             trash_size = get_path_size(trash)
             if trash_size > 10 * 1024 * 1024:
                 targets.append(CleanTarget(
-                    name="macOS Trash",
+                    name="Thùng rác macOS",
                     category=Category.TRASH,
                     path=trash,
                     size_bytes=trash_size,
                     risk_tier=RiskTier.TIER1_SAFE,
-                    description="Files moved to the Trash bin.",
+                    description="Các tệp bạn đã chuyển vào Thùng rác.",
                     item_type="contents",
                 ))
 

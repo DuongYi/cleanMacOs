@@ -16,6 +16,7 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
+from mclean import __version__
 from mclean.cleaner import execute_clean, split_by_running_apps
 from mclean.config import (
     CONFIG_FILE,
@@ -69,8 +70,17 @@ app = typer.Typer(
 console = Console()
 
 
+def _print_version(value: bool) -> None:
+    if value:
+        console.print(f"mclean {__version__}")
+        raise typer.Exit()
+
+
 @app.callback(invoke_without_command=True)
-def default_entry(ctx: typer.Context):
+def default_entry(
+    ctx: typer.Context,
+    version: bool = typer.Option(False, "--version", "-V", callback=_print_version, is_eager=True, help="In phiên bản rồi thoát"),
+):
     """Khi chỉ gõ `mclean` không kèm lệnh, tự động mở Dashboard tương tác mượt mà!"""
     if ctx.invoked_subcommand is None:
         from mclean.dashboard import interactive_dashboard_menu

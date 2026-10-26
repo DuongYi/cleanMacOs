@@ -38,15 +38,15 @@ def clean_target(target: CleanTarget, dry_run: bool = False) -> Tuple[bool, str]
     """Execute cleanup for a target produced by any scanner."""
     if target.item_type == "command" and target.clean_command:
         if dry_run:
-            return True, f"[Dry-run] Would execute: {' '.join(target.clean_command)}"
+            return True, f"[Dry-run] Sẽ chạy: {' '.join(target.clean_command)}"
         try:
             res = subprocess.run(target.clean_command, capture_output=True, text=True, timeout=600)
             if res.returncode == 0:
-                return True, f"Command succeeded: {' '.join(target.clean_command)}"
+                return True, f"Đã chạy: {' '.join(target.clean_command)}"
             else:
-                return False, f"Command failed: {res.stderr.strip() or res.stdout.strip()}"
+                return False, f"Lệnh lỗi: {res.stderr.strip() or res.stdout.strip()}"
         except Exception as e:
-            return False, f"Error executing command: {e}"
+            return False, f"Không chạy được lệnh: {e}"
 
     # Several paths belonging to one target (e.g. build/ and .dart_tool/flutter_build/)
     if target.item_type == "paths":
@@ -58,9 +58,9 @@ def clean_target(target: CleanTarget, dry_run: bool = False) -> Tuple[bool, str]
         try:
             children = [c for c in target.path.iterdir() if c.name not in excluded]
         except PermissionError:
-            return False, f"Permission denied reading {target.path}. Grant Full Disk Access to your terminal."
+            return False, f"Không có quyền đọc {target.path}. Cấp \"Truy cập toàn bộ ổ đĩa\" cho Terminal (xem `mclean doctor`)."
         except OSError as e:
-            return False, f"Error reading {target.path}: {e}"
+            return False, f"Lỗi khi đọc {target.path}: {e}"
         return _delete_all(children, dry_run)
 
     # Standard file or directory removal
@@ -76,4 +76,4 @@ def _delete_all(paths: List[Path], dry_run: bool) -> Tuple[bool, str]:
             failures.append(msg)
     if failures:
         return False, "; ".join(failures[:3])
-    return True, f"Deleted {len(paths)} item(s)"
+    return True, f"Đã xoá {len(paths)} mục"

@@ -1,7 +1,7 @@
 # ⚡ mclean (macOS Developer & AI Precision Cleaner)
 
 > **Công cụ dọn rác, tối ưu & tự động hoá chuyên dụng cho lập trình viên Flutter, Mobile & AI trên macOS.**  
-> Chắt lọc tinh hoa từ **tw93/Mole** (72.8k ⭐) và **PureMac** (7.4k ⭐).  
+> Lấy cảm hứng từ [tw93/Mole](https://github.com/tw93/Mole) và PureMac.  
 > Giải phóng ổ cứng mà **không ảnh hưởng công việc đang làm** và **không gây vòng lặp xoá rồi tải lại**.
 
 ---
@@ -16,14 +16,31 @@
 
 ---
 
-## 🚀 Khởi Động Nhanh
+## 🚀 Cài Đặt & Khởi Động Nhanh
 
-Lệnh `mclean` đã được liên kết sẵn vào hệ thống macOS. Bạn chỉ cần mở Terminal bất kỳ và gõ:
+Yêu cầu: macOS và Python 3.9 trở lên (Python có sẵn của macOS là đủ).
 
+**Cách 1: clone repo** (lần chạy đầu tự tạo môi trường ảo trong thư mục repo):
 ```bash
-mclean
+git clone https://github.com/DuongYi/cleanMacOs.git
+cd cleanMacOs
+./mclean scan                                # xem có gì dọn được, không xoá gì
+mkdir -p ~/.local/bin && ln -sf "$PWD/mclean" ~/.local/bin/mclean   # gọi `mclean` từ mọi nơi
 ```
-*(Nếu không truyền tham số, `mclean` sẽ tự động mở **Dashboard tương tác trực quan** với thanh tiến trình trực tiếp siêu mượt!)*
+
+**Cách 2: pipx**
+```bash
+pipx install git+https://github.com/DuongYi/cleanMacOs.git
+```
+
+Sau đó:
+```bash
+mclean            # Dashboard tương tác
+mclean doctor     # kiểm tra máy có gì khiến cache bị tải lại không
+mclean clean -n   # xem trước những gì sẽ được dọn (dry-run)
+```
+
+> ⚠️ mclean xoá dữ liệu thật. Mục SAFE được thiết kế để xoá xong không phải tải lại, nhưng hãy chạy `mclean scan` hoặc `--dry-run` trước để biết chính xác những gì sẽ bị xoá trên máy bạn.
 
 ---
 
@@ -174,3 +191,9 @@ Test chạy hoàn toàn trong thư mục tạm và không đụng tới cấu h�
 Trước khi dọn, `mclean` kiểm tra Xcode, iOS Simulator, Android Studio/Emulator, Gradle Daemon, Flutter/Dart, VS Code, Cursor, Ollama và LM Studio. Mục nào ứng dụng đang mở dùng tới sẽ **được bỏ qua**, không bị xoá, ở mọi chế độ (kể cả `--force` và lịch tự động). Bản Gradle mà một daemon đang chạy cũng không bao giờ bị đề xuất.
 
 > 💡 Extension Java/Gradle của VS Code-based IDE (`redhat.java`, `vscjava.vscode-gradle`) tự import cả các project Android mẫu trong `~/.pub-cache` và tải Gradle wrapper riêng cho từng project. Chạy `mclean doctor` để biết IDE nào đang làm vậy và đoạn setting cần thêm (`java.import.exclusions`, `gradle.autoDetect`).
+
+---
+
+## 📄 Giấy Phép
+
+[MIT](LICENSE) © 2026 Duong Yi

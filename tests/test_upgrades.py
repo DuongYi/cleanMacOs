@@ -76,7 +76,7 @@ def test_choices_grouped_by_category_largest_first_safe_checked():
     ]
     choices = cli.build_target_choices(targets)
     headers = [c.line for c in choices if isinstance(c, questionary.Separator)]
-    assert [h.split("(")[0].strip("─ \n") for h in headers] == ["Android & Gradle", "Browser Caches", "Developer Tools"]
+    assert [h.split("(")[0].strip("─ \n") for h in headers] == ["Android & Gradle", "Cache trình duyệt", "Công cụ lập trình"]
 
     items = [c for c in choices if not isinstance(c, questionary.Separator)]
     assert [c.value.name for c in items][:2] == ["x86 image", "Old NDK"]  # SAFE first inside a group

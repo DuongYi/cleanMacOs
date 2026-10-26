@@ -47,12 +47,12 @@ class DockerScanner(BaseScanner):
                     sz = get_path_size(p)
                     if sz > 10 * 1024 * 1024:
                         targets.append(CleanTarget(
-                            name=f"Docker Desktop {sub.capitalize()} Files",
+                            name=f"Docker Desktop: thư mục {sub}",
                             category=self.category,
                             path=p,
                             size_bytes=sz,
                             risk_tier=RiskTier.TIER1_SAFE,
-                            description=f"Temporary {sub} files from Docker Desktop VM.",
+                            description=f"File {sub} tạm của máy ảo Docker Desktop.",
                         ))
 
         # 2. If Docker engine is running, inspect live Docker objects
@@ -76,34 +76,34 @@ class DockerScanner(BaseScanner):
                         # If reclaimable space exists
                         if "Build Cache" in obj_type:
                             results.append(CleanTarget(
-                                name="Docker BuildKit Cache",
+                                name="Cache build Docker",
                                 category=self.category,
                                 path=Path.home() / ".docker" / "buildx",
                                 size_bytes=0,
                                 risk_tier=RiskTier.TIER1_SAFE,
-                                description=f"Build cache unused for {BUILD_CACHE_IDLE_HOURS // 24}+ days (total reclaimable: {reclaimable_str}). Recent layers are kept so builds stay fast.",
+                                description=f"Cache build không dùng {BUILD_CACHE_IDLE_HOURS // 24}+ ngày (tổng có thể thu hồi: {reclaimable_str}). Layer gần đây được giữ để build vẫn nhanh.",
                                 item_type="command",
                                 clean_command=["docker", "builder", "prune", "-f", "--filter", f"until={BUILD_CACHE_IDLE_HOURS}h"],
                             ))
                         elif "Images" in obj_type:
                             results.append(CleanTarget(
-                                name="Docker Dangling Images",
+                                name="Docker: image không gắn tag",
                                 category=self.category,
                                 path=Path.home() / ".docker",
                                 size_bytes=0,
                                 risk_tier=RiskTier.TIER1_SAFE,
-                                description=f"Untagged dangling container images (Reclaimable: {reclaimable_str})",
+                                description=f"Image không còn tag nào trỏ tới (có thể thu hồi: {reclaimable_str})",
                                 item_type="command",
                                 clean_command=["docker", "image", "prune", "-f"],
                             ))
                         elif "Containers" in obj_type:
                             results.append(CleanTarget(
-                                name="Docker Stopped Containers",
+                                name="Docker: container đã dừng",
                                 category=self.category,
                                 path=Path.home() / ".docker",
                                 size_bytes=0,
                                 risk_tier=RiskTier.TIER2_REVIEW,
-                                description=f"Exited/stopped containers (Reclaimable: {reclaimable_str}). Data written inside them is lost.",
+                                description=f"Container đã dừng (có thể thu hồi: {reclaimable_str}). Dữ liệu ghi bên trong sẽ mất.",
                                 item_type="command",
                                 clean_command=["docker", "container", "prune", "-f"],
                             ))
